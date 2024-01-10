@@ -290,8 +290,8 @@ def get_build_info():
     build = []
 
     # --disable-gil
-    if sysconfig.get_config_var('Py_NOGIL'):
-        build.append("nogil")
+    if sysconfig.get_config_var('Py_GIL_DISABLED'):
+        build.append("free_threading")
 
     if hasattr(sys, 'gettotalrefcount'):
         # --with-pydebug
@@ -340,6 +340,9 @@ def get_build_info():
     # --with-undefined-behavior-sanitizer
     if support.check_sanitizer(ub=True):
         sanitizers.append("UBSAN")
+    # --with-thread-sanitizer
+    if support.check_sanitizer(thread=True):
+        sanitizers.append("TSAN")
     if sanitizers:
         build.append('+'.join(sanitizers))
 
@@ -580,13 +583,6 @@ def format_resources(use_resources: Iterable[str]):
         return text
 
 
-def process_cpu_count():
-    if hasattr(os, 'sched_getaffinity'):
-        return len(os.sched_getaffinity(0))
-    else:
-        return os.cpu_count()
-
-
 def display_header(use_resources: tuple[str, ...],
                    python_cmd: tuple[str, ...] | None):
     # Print basic platform information
@@ -598,9 +594,10 @@ def display_header(use_resources: tuple[str, ...],
 
     cpu_count: object = os.cpu_count()
     if cpu_count:
-        affinity = process_cpu_count()
-        if affinity and affinity != cpu_count:
-            cpu_count = f"{affinity} (process) / {cpu_count} (system)"
+        # The function is new in Python 3.13; mypy doesn't know about it yet:
+        process_cpu_count = os.process_cpu_count()  # type: ignore[attr-defined]
+        if process_cpu_count and process_cpu_count != cpu_count:
+            cpu_count = f"{process_cpu_count} (process) / {cpu_count} (system)"
         print("== CPU count:", cpu_count)
     print("== encodings: locale=%s FS=%s"
           % (locale.getencoding(), sys.getfilesystemencoding()))
@@ -640,6 +637,7 @@ def display_header(use_resources: tuple[str, ...],
     asan = support.check_sanitizer(address=True)
     msan = support.check_sanitizer(memory=True)
     ubsan = support.check_sanitizer(ub=True)
+    tsan = support.check_sanitizer(thread=True)
     sanitizers = []
     if asan:
         sanitizers.append("address")
@@ -647,12 +645,15 @@ def display_header(use_resources: tuple[str, ...],
         sanitizers.append("memory")
     if ubsan:
         sanitizers.append("undefined behavior")
+    if tsan:
+        sanitizers.append("thread")
     if sanitizers:
         print(f"== sanitizers: {', '.join(sanitizers)}")
         for sanitizer, env_var in (
             (asan, "ASAN_OPTIONS"),
             (msan, "MSAN_OPTIONS"),
             (ubsan, "UBSAN_OPTIONS"),
+            (tsan, "TSAN_OPTIONS"),
         ):
             options= os.environ.get(env_var)
             if sanitizer and options is not None:

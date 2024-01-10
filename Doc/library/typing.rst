@@ -864,6 +864,16 @@ using ``[]``.
       def greet_proper(cond: bool) -> str | bytes:
           return "hi there!" if cond else b"greetings!"
 
+   .. deprecated-removed:: 3.13 3.18
+      Deprecated in favor of the new :ref:`type parameter syntax <type-params>`.
+      Use ``class A[T: (str, bytes)]: ...`` instead of importing ``AnyStr``. See
+      :pep:`695` for more details.
+
+      In Python 3.16, ``AnyStr`` will be removed from ``typing.__all__``, and
+      deprecation warnings will be emitted at runtime when it is accessed or
+      imported from ``typing``. ``AnyStr`` will be removed from ``typing``
+      in Python 3.18.
+
 .. data:: LiteralString
 
    Special type that includes only literal strings.
@@ -2097,6 +2107,19 @@ types.
    .. versionchanged:: 3.11
       Added support for generic namedtuples.
 
+   .. deprecated-removed:: 3.13 3.15
+      The undocumented keyword argument syntax for creating NamedTuple classes
+      (``NT = NamedTuple("NT", x=int)``) is deprecated, and will be disallowed
+      in 3.15. Use the class-based syntax or the functional syntax instead.
+
+   .. deprecated-removed:: 3.13 3.15
+      When using the functional syntax to create a NamedTuple class, failing to
+      pass a value to the 'fields' parameter (``NT = NamedTuple("NT")``) is
+      deprecated. Passing ``None`` to the 'fields' parameter
+      (``NT = NamedTuple("NT", None)``) is also deprecated. Both will be
+      disallowed in Python 3.15. To create a NamedTuple class with 0 fields,
+      use ``class NT(NamedTuple): pass`` or ``NT = NamedTuple("NT", [])``.
+
 .. class:: NewType(name, tp)
 
    Helper class to create low-overhead :ref:`distinct types <distinct>`.
@@ -2252,25 +2275,14 @@ types.
 
       assert Point2D(x=1, y=2, label='first') == dict(x=1, y=2, label='first')
 
-   To allow using this feature with older versions of Python that do not
-   support :pep:`526`, ``TypedDict`` supports two additional equivalent
-   syntactic forms:
-
-   * Using a literal :class:`dict` as the second argument::
+   An alternative way to create a ``TypedDict`` is by using
+   function-call syntax. The second argument must be a literal :class:`dict`::
 
       Point2D = TypedDict('Point2D', {'x': int, 'y': int, 'label': str})
 
-   * Using keyword arguments::
-
-      Point2D = TypedDict('Point2D', x=int, y=int, label=str)
-
-   .. deprecated-removed:: 3.11 3.13
-      The keyword-argument syntax is deprecated in 3.11 and will be removed
-      in 3.13. It may also be unsupported by static type checkers.
-
-   The functional syntax should also be used when any of the keys are not valid
-   :ref:`identifiers <identifiers>`, for example because they are keywords or contain hyphens.
-   Example::
+   This functional syntax allows defining keys which are not valid
+   :ref:`identifiers <identifiers>`, for example because they are
+   keywords or contain hyphens::
 
       # raises SyntaxError
       class Point2D(TypedDict):
@@ -2454,6 +2466,17 @@ types.
    .. versionchanged:: 3.11
       Added support for generic ``TypedDict``\ s.
 
+   .. versionchanged:: 3.13
+      Removed support for the keyword-argument method of creating ``TypedDict``\ s.
+
+   .. deprecated-removed:: 3.13 3.15
+      When using the functional syntax to create a TypedDict class, failing to
+      pass a value to the 'fields' parameter (``TD = TypedDict("TD")``) is
+      deprecated. Passing ``None`` to the 'fields' parameter
+      (``TD = TypedDict("TD", None)``) is also deprecated. Both will be
+      disallowed in Python 3.15. To create a TypedDict class with 0 fields,
+      use ``class TD(TypedDict): pass`` or ``TD = TypedDict("TD", {})``.
+
 Protocols
 ---------
 
@@ -2581,10 +2604,10 @@ Functions and decorators
 
 .. function:: reveal_type(obj, /)
 
-   Reveal the inferred static type of an expression.
+   Ask a static type checker to reveal the inferred type of an expression.
 
    When a static type checker encounters a call to this function,
-   it emits a diagnostic with the type of the argument. For example::
+   it emits a diagnostic with the inferred type of the argument. For example::
 
       x: int = 1
       reveal_type(x)  # Revealed type is "builtins.int"
@@ -2592,21 +2615,20 @@ Functions and decorators
    This can be useful when you want to debug how your type checker
    handles a particular piece of code.
 
-   The function returns its argument unchanged, which allows using
-   it within an expression::
-
-      x = reveal_type(1)  # Revealed type is "builtins.int"
-
-   Most type checkers support ``reveal_type()`` anywhere, even if the
-   name is not imported from ``typing``. Importing the name from
-   ``typing`` allows your code to run without runtime errors and
-   communicates intent more clearly.
-
-   At runtime, this function prints the runtime type of its argument to stderr
-   and returns it unchanged::
+   At runtime, this function prints the runtime type of its argument to
+   :data:`sys.stderr` and returns the argument unchanged (allowing the call to
+   be used within an expression)::
 
       x = reveal_type(1)  # prints "Runtime type is int"
       print(x)  # prints "1"
+
+   Note that the runtime type may be different from (more or less specific
+   than) the type statically inferred by a type checker.
+
+   Most type checkers support ``reveal_type()`` anywhere, even if the
+   name is not imported from ``typing``. Importing the name from
+   ``typing``, however, allows your code to run without runtime errors and
+   communicates intent more clearly.
 
    .. versionadded:: 3.11
 
@@ -2877,6 +2899,9 @@ Functions and decorators
    This wraps the decorator with something that wraps the decorated
    function in :func:`no_type_check`.
 
+   .. deprecated-removed:: 3.13 3.15
+      No type checker ever added support for ``@no_type_check_decorator``. It
+      is therefore deprecated, and will be removed in Python 3.15.
 
 .. decorator:: override
 
@@ -3025,6 +3050,38 @@ Introspection helpers
       assert get_args(Union[int, str]) == (int, str)
 
    .. versionadded:: 3.8
+
+.. function:: get_protocol_members(tp)
+
+   Return the set of members defined in a :class:`Protocol`.
+
+   .. doctest::
+
+      >>> from typing import Protocol, get_protocol_members
+      >>> class P(Protocol):
+      ...     def a(self) -> str: ...
+      ...     b: int
+      >>> get_protocol_members(P) == frozenset({'a', 'b'})
+      True
+
+   Raise :exc:`TypeError` for arguments that are not Protocols.
+
+   .. versionadded:: 3.13
+
+.. function:: is_protocol(tp)
+
+   Determine if a type is a :class:`Protocol`.
+
+   For example::
+
+      class P(Protocol):
+          def a(self) -> str: ...
+          b: int
+
+      is_protocol(P)    # => True
+      is_protocol(int)  # => False
+
+   .. versionadded:: 3.13
 
 .. function:: is_typeddict(tp)
 
@@ -3269,10 +3326,6 @@ Aliases to types in :mod:`collections`
 Aliases to other concrete types
 """""""""""""""""""""""""""""""
 
-   .. deprecated-removed:: 3.8 3.13
-      The ``typing.io`` namespace is deprecated and will be removed.
-      These types should be directly imported from ``typing`` instead.
-
 .. class:: Pattern
            Match
 
@@ -3283,10 +3336,6 @@ Aliases to other concrete types
    :data:`AnyStr`. ``Pattern`` can be specialised as ``Pattern[str]`` or
    ``Pattern[bytes]``; ``Match`` can be specialised as ``Match[str]`` or
    ``Match[bytes]``.
-
-   .. deprecated-removed:: 3.8 3.13
-      The ``typing.re`` namespace is deprecated and will be removed.
-      These types should be directly imported from ``typing`` instead.
 
    .. deprecated:: 3.9
       Classes ``Pattern`` and ``Match`` from :mod:`re` now support ``[]``.
@@ -3665,10 +3714,6 @@ convenience. This is subject to change, and not all deprecations are listed.
      - Deprecated in
      - Projected removal
      - PEP/issue
-   * - ``typing.io`` and ``typing.re`` submodules
-     - 3.8
-     - 3.13
-     - :issue:`38291`
    * - ``typing`` versions of standard collections
      - 3.9
      - Undecided (see :ref:`deprecated-aliases` for more information)
@@ -3689,3 +3734,11 @@ convenience. This is subject to change, and not all deprecations are listed.
      - 3.12
      - Undecided
      - :pep:`695`
+   * - :func:`@typing.no_type_check_decorator <no_type_check_decorator>`
+     - 3.13
+     - 3.15
+     - :gh:`106309`
+   * - :data:`typing.AnyStr`
+     - 3.13
+     - 3.18
+     - :gh:`105578`

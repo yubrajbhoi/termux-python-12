@@ -659,6 +659,7 @@ class TestPegen(unittest.TestCase):
         """
         parser_class = make_parser(grammar)
         node = parse_string("foo = 12 + 12 .", parser_class)
+        self.maxDiff = None
         self.assertEqual(
             node,
             [

@@ -1,6 +1,6 @@
 import unittest
-import sys
 from collections import OrderedDict
+from test import support
 from test.support import import_helper
 
 _testcapi = import_helper.import_module('_testcapi')
@@ -159,6 +159,34 @@ class CAPITest(unittest.TestCase):
         # CRASHES getattrstring(obj, NULL)
         # CRASHES getattrstring(NULL, b'a')
 
+    def test_object_getoptionalattr(self):
+        getoptionalattr = _testcapi.object_getoptionalattr
+        obj = TestObject()
+        obj.a = 11
+        setattr(obj, '\U0001f40d', 22)
+        self.assertEqual(getoptionalattr(obj, 'a'), 11)
+        self.assertIs(getoptionalattr(obj, 'b'), AttributeError)
+        self.assertEqual(getoptionalattr(obj, '\U0001f40d'), 22)
+
+        self.assertRaises(RuntimeError, getoptionalattr, obj, 'evil')
+        self.assertRaises(TypeError, getoptionalattr, obj, 1)
+        # CRASHES getoptionalattr(obj, NULL)
+        # CRASHES getoptionalattr(NULL, 'a')
+
+    def test_object_getoptionalattrstring(self):
+        getoptionalattrstring = _testcapi.object_getoptionalattrstring
+        obj = TestObject()
+        obj.a = 11
+        setattr(obj, '\U0001f40d', 22)
+        self.assertEqual(getoptionalattrstring(obj, b'a'), 11)
+        self.assertIs(getoptionalattrstring(obj, b'b'), AttributeError)
+        self.assertEqual(getoptionalattrstring(obj, '\U0001f40d'.encode()), 22)
+
+        self.assertRaises(RuntimeError, getoptionalattrstring, obj, b'evil')
+        self.assertRaises(UnicodeDecodeError, getoptionalattrstring, obj, b'\xff')
+        # CRASHES getoptionalattrstring(obj, NULL)
+        # CRASHES getoptionalattrstring(NULL, b'a')
+
     def test_object_hasattr(self):
         xhasattr = _testcapi.object_hasattr
         obj = TestObject()
@@ -168,8 +196,18 @@ class CAPITest(unittest.TestCase):
         self.assertFalse(xhasattr(obj, 'b'))
         self.assertTrue(xhasattr(obj, '\U0001f40d'))
 
-        self.assertFalse(xhasattr(obj, 'evil'))
-        self.assertFalse(xhasattr(obj, 1))
+        with support.catch_unraisable_exception() as cm:
+            self.assertFalse(xhasattr(obj, 'evil'))
+            self.assertEqual(cm.unraisable.exc_type, RuntimeError)
+            self.assertEqual(str(cm.unraisable.exc_value),
+                             'do not get evil')
+
+        with support.catch_unraisable_exception() as cm:
+            self.assertFalse(xhasattr(obj, 1))
+            self.assertEqual(cm.unraisable.exc_type, TypeError)
+            self.assertEqual(str(cm.unraisable.exc_value),
+                             "attribute name must be string, not 'int'")
+
         # CRASHES xhasattr(obj, NULL)
         # CRASHES xhasattr(NULL, 'a')
 
@@ -182,8 +220,46 @@ class CAPITest(unittest.TestCase):
         self.assertFalse(hasattrstring(obj, b'b'))
         self.assertTrue(hasattrstring(obj, '\U0001f40d'.encode()))
 
-        self.assertFalse(hasattrstring(obj, b'evil'))
-        self.assertFalse(hasattrstring(obj, b'\xff'))
+        with support.catch_unraisable_exception() as cm:
+            self.assertFalse(hasattrstring(obj, b'evil'))
+            self.assertEqual(cm.unraisable.exc_type, RuntimeError)
+            self.assertEqual(str(cm.unraisable.exc_value),
+                             'do not get evil')
+
+        with support.catch_unraisable_exception() as cm:
+            self.assertFalse(hasattrstring(obj, b'\xff'))
+            self.assertEqual(cm.unraisable.exc_type, UnicodeDecodeError)
+            self.assertRegex(str(cm.unraisable.exc_value),
+                             "'utf-8' codec can't decode")
+
+        # CRASHES hasattrstring(obj, NULL)
+        # CRASHES hasattrstring(NULL, b'a')
+
+    def test_object_hasattrwitherror(self):
+        xhasattr = _testcapi.object_hasattrwitherror
+        obj = TestObject()
+        obj.a = 1
+        setattr(obj, '\U0001f40d', 2)
+        self.assertTrue(xhasattr(obj, 'a'))
+        self.assertFalse(xhasattr(obj, 'b'))
+        self.assertTrue(xhasattr(obj, '\U0001f40d'))
+
+        self.assertRaises(RuntimeError, xhasattr, obj, 'evil')
+        self.assertRaises(TypeError, xhasattr, obj, 1)
+        # CRASHES xhasattr(obj, NULL)
+        # CRASHES xhasattr(NULL, 'a')
+
+    def test_object_hasattrstringwitherror(self):
+        hasattrstring = _testcapi.object_hasattrstringwitherror
+        obj = TestObject()
+        obj.a = 1
+        setattr(obj, '\U0001f40d', 2)
+        self.assertTrue(hasattrstring(obj, b'a'))
+        self.assertFalse(hasattrstring(obj, b'b'))
+        self.assertTrue(hasattrstring(obj, '\U0001f40d'.encode()))
+
+        self.assertRaises(RuntimeError, hasattrstring, obj, b'evil')
+        self.assertRaises(UnicodeDecodeError, hasattrstring, obj, b'\xff')
         # CRASHES hasattrstring(obj, NULL)
         # CRASHES hasattrstring(NULL, b'a')
 
@@ -323,6 +399,43 @@ class CAPITest(unittest.TestCase):
         self.assertRaises(TypeError, getitemstring, [], b'a')
         self.assertRaises(SystemError, getitemstring, NULL, b'a')
 
+    def test_mapping_getoptionalitem(self):
+        getitem = _testcapi.mapping_getoptionalitem
+        dct = {'a': 1, '\U0001f40d': 2}
+        self.assertEqual(getitem(dct, 'a'), 1)
+        self.assertEqual(getitem(dct, 'b'), KeyError)
+        self.assertEqual(getitem(dct, '\U0001f40d'), 2)
+
+        dct2 = ProxyGetItem(dct)
+        self.assertEqual(getitem(dct2, 'a'), 1)
+        self.assertEqual(getitem(dct2, 'b'), KeyError)
+
+        self.assertEqual(getitem(['a', 'b', 'c'], 1), 'b')
+
+        self.assertRaises(TypeError, getitem, 42, 'a')
+        self.assertRaises(TypeError, getitem, {}, [])  # unhashable
+        self.assertRaises(IndexError, getitem, [], 1)
+        self.assertRaises(TypeError, getitem, [], 'a')
+        # CRASHES getitem({}, NULL)
+        # CRASHES getitem(NULL, 'a')
+
+    def test_mapping_getoptionalitemstring(self):
+        getitemstring = _testcapi.mapping_getoptionalitemstring
+        dct = {'a': 1, '\U0001f40d': 2}
+        self.assertEqual(getitemstring(dct, b'a'), 1)
+        self.assertEqual(getitemstring(dct, b'b'), KeyError)
+        self.assertEqual(getitemstring(dct, '\U0001f40d'.encode()), 2)
+
+        dct2 = ProxyGetItem(dct)
+        self.assertEqual(getitemstring(dct2, b'a'), 1)
+        self.assertEqual(getitemstring(dct2, b'b'), KeyError)
+
+        self.assertRaises(TypeError, getitemstring, 42, b'a')
+        self.assertRaises(UnicodeDecodeError, getitemstring, {}, b'\xff')
+        self.assertRaises(SystemError, getitemstring, {}, NULL)
+        self.assertRaises(TypeError, getitemstring, [], b'a')
+        # CRASHES getitemstring(NULL, b'a')
+
     def test_mapping_haskey(self):
         haskey = _testcapi.mapping_haskey
         dct = {'a': 1, '\U0001f40d': 2}
@@ -336,12 +449,41 @@ class CAPITest(unittest.TestCase):
 
         self.assertTrue(haskey(['a', 'b', 'c'], 1))
 
-        self.assertFalse(haskey(42, 'a'))
-        self.assertFalse(haskey({}, []))  # unhashable
-        self.assertFalse(haskey({}, NULL))
-        self.assertFalse(haskey([], 1))
-        self.assertFalse(haskey([], 'a'))
-        self.assertFalse(haskey(NULL, 'a'))
+        with support.catch_unraisable_exception() as cm:
+            self.assertFalse(haskey(42, 'a'))
+            self.assertEqual(cm.unraisable.exc_type, TypeError)
+            self.assertEqual(str(cm.unraisable.exc_value),
+                             "'int' object is not subscriptable")
+
+        with support.catch_unraisable_exception() as cm:
+            self.assertFalse(haskey({}, []))
+            self.assertEqual(cm.unraisable.exc_type, TypeError)
+            self.assertEqual(str(cm.unraisable.exc_value),
+                             "unhashable type: 'list'")
+
+        with support.catch_unraisable_exception() as cm:
+            self.assertFalse(haskey([], 1))
+            self.assertEqual(cm.unraisable.exc_type, IndexError)
+            self.assertEqual(str(cm.unraisable.exc_value),
+                             'list index out of range')
+
+        with support.catch_unraisable_exception() as cm:
+            self.assertFalse(haskey([], 'a'))
+            self.assertEqual(cm.unraisable.exc_type, TypeError)
+            self.assertEqual(str(cm.unraisable.exc_value),
+                             'list indices must be integers or slices, not str')
+
+        with support.catch_unraisable_exception() as cm:
+            self.assertFalse(haskey({}, NULL))
+            self.assertEqual(cm.unraisable.exc_type, SystemError)
+            self.assertEqual(str(cm.unraisable.exc_value),
+                             'null argument to internal routine')
+
+        with support.catch_unraisable_exception() as cm:
+            self.assertFalse(haskey(NULL, 'a'))
+            self.assertEqual(cm.unraisable.exc_type, SystemError)
+            self.assertEqual(str(cm.unraisable.exc_value),
+                             'null argument to internal routine')
 
     def test_mapping_haskeystring(self):
         haskeystring = _testcapi.mapping_haskeystring
@@ -354,11 +496,73 @@ class CAPITest(unittest.TestCase):
         self.assertTrue(haskeystring(dct2, b'a'))
         self.assertFalse(haskeystring(dct2, b'b'))
 
-        self.assertFalse(haskeystring(42, b'a'))
-        self.assertFalse(haskeystring({}, b'\xff'))
-        self.assertFalse(haskeystring({}, NULL))
-        self.assertFalse(haskeystring([], b'a'))
-        self.assertFalse(haskeystring(NULL, b'a'))
+        with support.catch_unraisable_exception() as cm:
+            self.assertFalse(haskeystring(42, b'a'))
+            self.assertEqual(cm.unraisable.exc_type, TypeError)
+            self.assertEqual(str(cm.unraisable.exc_value),
+                             "'int' object is not subscriptable")
+
+        with support.catch_unraisable_exception() as cm:
+            self.assertFalse(haskeystring({}, b'\xff'))
+            self.assertEqual(cm.unraisable.exc_type, UnicodeDecodeError)
+            self.assertRegex(str(cm.unraisable.exc_value),
+                             "'utf-8' codec can't decode")
+
+        with support.catch_unraisable_exception() as cm:
+            self.assertFalse(haskeystring({}, NULL))
+            self.assertEqual(cm.unraisable.exc_type, SystemError)
+            self.assertEqual(str(cm.unraisable.exc_value),
+                             "null argument to internal routine")
+
+        with support.catch_unraisable_exception() as cm:
+            self.assertFalse(haskeystring([], b'a'))
+            self.assertEqual(cm.unraisable.exc_type, TypeError)
+            self.assertEqual(str(cm.unraisable.exc_value),
+                             'list indices must be integers or slices, not str')
+
+        with support.catch_unraisable_exception() as cm:
+            self.assertFalse(haskeystring(NULL, b'a'))
+            self.assertEqual(cm.unraisable.exc_type, SystemError)
+            self.assertEqual(str(cm.unraisable.exc_value),
+                             "null argument to internal routine")
+
+    def test_mapping_haskeywitherror(self):
+        haskey = _testcapi.mapping_haskeywitherror
+        dct = {'a': 1, '\U0001f40d': 2}
+        self.assertTrue(haskey(dct, 'a'))
+        self.assertFalse(haskey(dct, 'b'))
+        self.assertTrue(haskey(dct, '\U0001f40d'))
+
+        dct2 = ProxyGetItem(dct)
+        self.assertTrue(haskey(dct2, 'a'))
+        self.assertFalse(haskey(dct2, 'b'))
+
+        self.assertTrue(haskey(['a', 'b', 'c'], 1))
+
+        self.assertRaises(TypeError, haskey, 42, 'a')
+        self.assertRaises(TypeError, haskey, {}, [])  # unhashable
+        self.assertRaises(IndexError, haskey, [], 1)
+        self.assertRaises(TypeError, haskey, [], 'a')
+
+        # CRASHES haskey({}, NULL))
+        # CRASHES haskey(NULL, 'a'))
+
+    def test_mapping_haskeystringwitherror(self):
+        haskeystring = _testcapi.mapping_haskeystringwitherror
+        dct = {'a': 1, '\U0001f40d': 2}
+        self.assertTrue(haskeystring(dct, b'a'))
+        self.assertFalse(haskeystring(dct, b'b'))
+        self.assertTrue(haskeystring(dct, '\U0001f40d'.encode()))
+
+        dct2 = ProxyGetItem(dct)
+        self.assertTrue(haskeystring(dct2, b'a'))
+        self.assertFalse(haskeystring(dct2, b'b'))
+
+        self.assertRaises(TypeError, haskeystring, 42, b'a')
+        self.assertRaises(UnicodeDecodeError, haskeystring, {}, b'\xff')
+        self.assertRaises(SystemError, haskeystring, {}, NULL)
+        self.assertRaises(TypeError, haskeystring, [], b'a')
+        # CRASHES haskeystring(NULL, b'a')
 
     def test_object_setitem(self):
         setitem = _testcapi.object_setitem
@@ -788,6 +992,13 @@ class CAPITest(unittest.TestCase):
 
         self.assertRaises(TypeError, xtuple, 42)
         self.assertRaises(SystemError, xtuple, NULL)
+
+    def test_number_check(self):
+        number_check = _testcapi.number_check
+        self.assertTrue(number_check(1 + 1j))
+        self.assertTrue(number_check(1))
+        self.assertTrue(number_check(0.5))
+        self.assertFalse(number_check("1 + 1j"))
 
 
 if __name__ == "__main__":

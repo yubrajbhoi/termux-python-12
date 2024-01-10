@@ -107,7 +107,6 @@
     <ClCompile Include="..\Modules\_testcapi\set.c" />
     <ClCompile Include="..\Modules\_testcapi\list.c" />
     <ClCompile Include="..\Modules\_testcapi\tuple.c" />
-    <ClCompile Include="..\Modules\_testcapi\pytime.c" />
     <ClCompile Include="..\Modules\_testcapi\datetime.c" />
     <ClCompile Include="..\Modules\_testcapi\docstring.c" />
     <ClCompile Include="..\Modules\_testcapi\mem.c" />
@@ -120,10 +119,12 @@
     <ClCompile Include="..\Modules\_testcapi\exceptions.c" />
     <ClCompile Include="..\Modules\_testcapi\code.c" />
     <ClCompile Include="..\Modules\_testcapi\buffer.c" />
+    <ClCompile Include="..\Modules\_testcapi\pyatomic.c" />
     <ClCompile Include="..\Modules\_testcapi\pyos.c" />
     <ClCompile Include="..\Modules\_testcapi\file.c" />
     <ClCompile Include="..\Modules\_testcapi\codec.c" />
     <ClCompile Include="..\Modules\_testcapi\sys.c" />
+    <ClCompile Include="..\Modules\_testcapi\hash.c" />
     <ClCompile Include="..\Modules\_testcapi\immortal.c" />
     <ClCompile Include="..\Modules\_testcapi\gc.c" />
   </ItemGroup>

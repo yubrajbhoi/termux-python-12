@@ -21,13 +21,12 @@ import time
 import types
 import unittest
 from unittest import mock
-import _testinternalcapi
 import _imp
 
 from test.support import os_helper
 from test.support import (
     STDLIB_DIR, swap_attr, swap_item, cpython_only, is_emscripten,
-    is_wasi, run_in_subinterp, run_in_subinterp_with_config)
+    is_wasi, run_in_subinterp, run_in_subinterp_with_config, Py_TRACE_REFS)
 from test.support.import_helper import (
     forget, make_legacy_pyc, unlink, unload, ready_to_import,
     DirsOnSysPath, CleanImport)
@@ -49,6 +48,10 @@ try:
     import _xxsubinterpreters as _interpreters
 except ModuleNotFoundError:
     _interpreters = None
+try:
+    import _testinternalcapi
+except ImportError:
+    _testinternalcapi = None
 
 
 skip_if_dont_write_bytecode = unittest.skipIf(
@@ -406,9 +409,12 @@ class ImportTests(unittest.TestCase):
             import RAnDoM
 
     def test_double_const(self):
-        # Another brief digression to test the accuracy of manifest float
-        # constants.
-        from test import double_const  # don't blink -- that *was* the test
+        # Importing double_const checks that float constants
+        # serialiazed by marshal as PYC files don't lose precision
+        # (SF bug 422177).
+        from test.test_import.data import double_const
+        unload('test.test_import.data.double_const')
+        from test.test_import.data import double_const
 
     def test_import(self):
         def test_with_extension(ext):
@@ -1626,6 +1632,14 @@ class CircularImportTests(unittest.TestCase):
             str(cm.exception),
         )
 
+    def test_circular_import(self):
+        with self.assertRaisesRegex(
+            AttributeError,
+            r"partially initialized module 'test.test_import.data.circular_imports.import_cycle' "
+            r"from '.*' has no attribute 'some_attribute' \(most likely due to a circular import\)"
+        ):
+            import test.test_import.data.circular_imports.import_cycle
+
     def test_absolute_circular_submodule(self):
         with self.assertRaises(AttributeError) as cm:
             import test.test_import.data.circular_imports.subpkg2.parent
@@ -1784,12 +1798,12 @@ class SubinterpImportTests(unittest.TestCase):
             check_multi_interp_extensions=strict,
         )
         _, out, err = script_helper.assert_python_ok('-c', textwrap.dedent(f'''
-            import _testcapi, sys
+            import _testinternalcapi, sys
             assert (
                 {name!r} in sys.builtin_module_names or
                 {name!r} not in sys.modules
             ), repr({name!r})
-            ret = _testcapi.run_in_subinterp_with_config(
+            ret = _testinternalcapi.run_in_subinterp_with_config(
                 {self.import_script(name, "sys.stdout.fileno()")!r},
                 **{kwargs},
             )
@@ -1808,9 +1822,9 @@ class SubinterpImportTests(unittest.TestCase):
             check_multi_interp_extensions=True,
         )
         _, out, err = script_helper.assert_python_ok('-c', textwrap.dedent(f'''
-            import _testcapi, sys
+            import _testinternalcapi, sys
             assert {name!r} not in sys.modules, {name!r}
-            ret = _testcapi.run_in_subinterp_with_config(
+            ret = _testinternalcapi.run_in_subinterp_with_config(
                 {self.import_script(name, "sys.stdout.fileno()")!r},
                 **{kwargs},
             )
@@ -1965,10 +1979,13 @@ class SubinterpImportTests(unittest.TestCase):
             print(_testsinglephase)
             ''')
         interpid = _interpreters.create()
-        with self.assertRaises(_interpreters.RunFailedError):
-            _interpreters.run_string(interpid, script)
-        with self.assertRaises(_interpreters.RunFailedError):
-            _interpreters.run_string(interpid, script)
+        self.addCleanup(lambda: _interpreters.destroy(interpid))
+
+        excsnap = _interpreters.run_string(interpid, script)
+        self.assertIsNot(excsnap, None)
+
+        excsnap = _interpreters.run_string(interpid, script)
+        self.assertIsNot(excsnap, None)
 
 
 class TestSinglePhaseSnapshot(ModuleSnapshot):
@@ -2097,12 +2114,18 @@ class SinglephaseInitTests(unittest.TestCase):
 
     def add_subinterpreter(self):
         interpid = _interpreters.create(isolated=False)
-        _interpreters.run_string(interpid, textwrap.dedent('''
+        def ensure_destroyed():
+            try:
+                _interpreters.destroy(interpid)
+            except _interpreters.InterpreterNotFoundError:
+                pass
+        self.addCleanup(ensure_destroyed)
+        _interpreters.exec(interpid, textwrap.dedent('''
             import sys
             import _testinternalcapi
             '''))
         def clean_up():
-            _interpreters.run_string(interpid, textwrap.dedent(f'''
+            _interpreters.exec(interpid, textwrap.dedent(f'''
                 name = {self.NAME!r}
                 if name in sys.modules:
                     sys.modules.pop(name)._clear_globals()
@@ -2534,7 +2557,7 @@ class SinglephaseInitTests(unittest.TestCase):
     def test_basic_multiple_interpreters_deleted_no_reset(self):
         # without resetting; already loaded in a deleted interpreter
 
-        if hasattr(sys, 'getobjects'):
+        if Py_TRACE_REFS:
             # It's a Py_TRACE_REFS build.
             # This test breaks interpreter isolation a little,
             # which causes problems on Py_TRACE_REF builds.
@@ -2661,6 +2684,30 @@ class SinglephaseInitTests(unittest.TestCase):
         #  * mod init func ran again
         #  * m_copy was copied from interp2 (was from interp1)
         #  * module's global state was initialized, not reset
+
+
+@cpython_only
+class CAPITests(unittest.TestCase):
+    def test_pyimport_addmodule(self):
+        # gh-105922: Test PyImport_AddModuleRef(), PyImport_AddModule()
+        # and PyImport_AddModuleObject()
+        import _testcapi
+        for name in (
+            'sys',     # frozen module
+            'test',    # package
+            __name__,  # package.module
+        ):
+            _testcapi.check_pyimport_addmodule(name)
+
+    def test_pyimport_addmodule_create(self):
+        # gh-105922: Test PyImport_AddModuleRef(), create a new module
+        import _testcapi
+        name = 'dontexist'
+        self.assertNotIn(name, sys.modules)
+        self.addCleanup(unload, name)
+
+        mod = _testcapi.check_pyimport_addmodule(name)
+        self.assertIs(mod, sys.modules[name])
 
 
 if __name__ == '__main__':

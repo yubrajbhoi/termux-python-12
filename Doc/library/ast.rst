@@ -45,7 +45,7 @@ Node classes
 
    This is the base of all AST node classes.  The actual node classes are
    derived from the :file:`Parser/Python.asdl` file, which is reproduced
-   :ref:`above <abstract-grammar>`.  They are defined in the :mod:`_ast` C
+   :ref:`above <abstract-grammar>`.  They are defined in the :mod:`!_ast` C
    module and re-exported in :mod:`ast`.
 
    There is one class defined for each left-hand side symbol in the abstract
@@ -128,14 +128,14 @@ Node classes
 
 .. deprecated:: 3.8
 
-   Old classes :class:`ast.Num`, :class:`ast.Str`, :class:`ast.Bytes`,
-   :class:`ast.NameConstant` and :class:`ast.Ellipsis` are still available,
+   Old classes :class:`!ast.Num`, :class:`!ast.Str`, :class:`!ast.Bytes`,
+   :class:`!ast.NameConstant` and :class:`!ast.Ellipsis` are still available,
    but they will be removed in future Python releases.  In the meantime,
    instantiating them will return an instance of a different class.
 
 .. deprecated:: 3.9
 
-   Old classes :class:`ast.Index` and :class:`ast.ExtSlice` are still
+   Old classes :class:`!ast.Index` and :class:`!ast.ExtSlice` are still
    available, but they will be removed in future Python releases.
    In the meantime, instantiating them will return an instance of
    a different class.
@@ -1935,8 +1935,7 @@ Function and class definitions
 .. class:: arg(arg, annotation, type_comment)
 
    A single argument in a list. ``arg`` is a raw string of the argument
-   name, ``annotation`` is its annotation, such as a :class:`Str` or
-   :class:`Name` node.
+   name; ``annotation`` is its annotation, such as a :class:`Name` node.
 
    .. attribute:: type_comment
 
@@ -2160,10 +2159,12 @@ Async and await
 Apart from the node classes, the :mod:`ast` module defines these utility functions
 and classes for traversing abstract syntax trees:
 
-.. function:: parse(source, filename='<unknown>', mode='exec', *, type_comments=False, feature_version=None)
+.. function:: parse(source, filename='<unknown>', mode='exec', *, type_comments=False, feature_version=None, optimize=-1)
 
    Parse the source into an AST node.  Equivalent to ``compile(source,
-   filename, mode, ast.PyCF_ONLY_AST)``.
+   filename, mode, flags=FLAGS_VALUE, optimize=optimize)``,
+   where ``FLAGS_VALUE`` is ``ast.PyCF_ONLY_AST`` if ``optimize <= 0``
+   and ``ast.PyCF_OPTIMIZED_AST`` otherwise.
 
    If ``type_comments=True`` is given, the parser is modified to check
    and return type comments as specified by :pep:`484` and :pep:`526`.
@@ -2184,7 +2185,7 @@ and classes for traversing abstract syntax trees:
    Currently ``major`` must equal to ``3``.  For example, setting
    ``feature_version=(3, 4)`` will allow the use of ``async`` and
    ``await`` as variable names.  The lowest supported version is
-   ``(3, 4)``; the highest is ``sys.version_info[0:2]``.
+   ``(3, 7)``; the highest is ``sys.version_info[0:2]``.
 
    If source contains a null character ('\0'), :exc:`ValueError` is raised.
 
@@ -2206,6 +2207,10 @@ and classes for traversing abstract syntax trees:
 
    .. versionchanged:: 3.8
       Added ``type_comments``, ``mode='func_type'`` and ``feature_version``.
+
+   .. versionchanged:: 3.13
+      The minimum supported version for ``feature_version`` is now ``(3, 7)``.
+      The ``optimize`` argument was added.
 
 
 .. function:: unparse(ast_obj)
@@ -2280,8 +2285,8 @@ and classes for traversing abstract syntax trees:
 .. function:: get_source_segment(source, node, *, padded=False)
 
    Get source code segment of the *source* that generated *node*.
-   If some location information (:attr:`lineno`, :attr:`end_lineno`,
-   :attr:`col_offset`, or :attr:`end_col_offset`) is missing, return ``None``.
+   If some location information (:attr:`~ast.AST.lineno`, :attr:`~ast.AST.end_lineno`,
+   :attr:`~ast.AST.col_offset`, or :attr:`~ast.AST.end_col_offset`) is missing, return ``None``.
 
    If *padded* is ``True``, the first line of a multi-line statement will
    be padded with spaces to match its original position.
@@ -2292,7 +2297,7 @@ and classes for traversing abstract syntax trees:
 .. function:: fix_missing_locations(node)
 
    When you compile a node tree with :func:`compile`, the compiler expects
-   :attr:`lineno` and :attr:`col_offset` attributes for every node that supports
+   :attr:`~ast.AST.lineno` and :attr:`~ast.AST.col_offset` attributes for every node that supports
    them.  This is rather tedious to fill in for generated nodes, so this helper
    adds these attributes recursively where not already set, by setting them to
    the values of the parent node.  It works recursively starting at *node*.
@@ -2307,8 +2312,8 @@ and classes for traversing abstract syntax trees:
 
 .. function:: copy_location(new_node, old_node)
 
-   Copy source location (:attr:`lineno`, :attr:`col_offset`, :attr:`end_lineno`,
-   and :attr:`end_col_offset`) from *old_node* to *new_node* if possible,
+   Copy source location (:attr:`~ast.AST.lineno`, :attr:`~ast.AST.col_offset`, :attr:`~ast.AST.end_lineno`,
+   and :attr:`~ast.AST.end_col_offset`) from *old_node* to *new_node* if possible,
    and return *new_node*.
 
 
@@ -2354,14 +2359,18 @@ and classes for traversing abstract syntax trees:
       visited unless the visitor calls :meth:`generic_visit` or visits them
       itself.
 
+   .. method:: visit_Constant(node)
+
+      Handles all constant nodes.
+
    Don't use the :class:`NodeVisitor` if you want to apply changes to nodes
    during traversal.  For this a special visitor exists
    (:class:`NodeTransformer`) that allows modifications.
 
    .. deprecated:: 3.8
 
-      Methods :meth:`visit_Num`, :meth:`visit_Str`, :meth:`visit_Bytes`,
-      :meth:`visit_NameConstant` and :meth:`visit_Ellipsis` are deprecated
+      Methods :meth:`!visit_Num`, :meth:`!visit_Str`, :meth:`!visit_Bytes`,
+      :meth:`!visit_NameConstant` and :meth:`!visit_Ellipsis` are deprecated
       now and will not be called in future Python versions.  Add the
       :meth:`visit_Constant` method to handle all constant nodes.
 
@@ -2390,7 +2399,7 @@ and classes for traversing abstract syntax trees:
               )
 
    Keep in mind that if the node you're operating on has child nodes you must
-   either transform the child nodes yourself or call the :meth:`generic_visit`
+   either transform the child nodes yourself or call the :meth:`~ast.NodeVisitor.generic_visit`
    method for the node first.
 
    For nodes that were part of a collection of statements (that applies to all
@@ -2399,7 +2408,7 @@ and classes for traversing abstract syntax trees:
 
    If :class:`NodeTransformer` introduces new nodes (that weren't part of
    original tree) without giving them location information (such as
-   :attr:`lineno`), :func:`fix_missing_locations` should be called with
+   :attr:`~ast.AST.lineno`), :func:`fix_missing_locations` should be called with
    the new sub-tree to recalculate the location information::
 
       tree = ast.parse('foo', mode='eval')
@@ -2450,6 +2459,13 @@ effects on the compilation of a program:
 
    Generates and returns an abstract syntax tree instead of returning a
    compiled code object.
+
+.. data:: PyCF_OPTIMIZED_AST
+
+   The returned AST is optimized according to the *optimize* argument
+   in :func:`compile` or :func:`ast.parse`.
+
+   .. versionadded:: 3.13
 
 .. data:: PyCF_TYPE_COMMENTS
 

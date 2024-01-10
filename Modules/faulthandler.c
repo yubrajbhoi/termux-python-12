@@ -3,10 +3,13 @@
 #include "pycore_pyerrors.h"      // _Py_DumpExtensionModules
 #include "pycore_pystate.h"       // _PyThreadState_GET()
 #include "pycore_signal.h"        // Py_NSIG
+#include "pycore_sysmodule.h"     // _PySys_GetAttr()
 #include "pycore_traceback.h"     // _Py_DumpTracebackThreads
 
-#include <object.h>
-#include <signal.h>
+#ifdef HAVE_UNISTD_H
+#  include <unistd.h>             // _exit()
+#endif
+#include <signal.h>               // sigaction()
 #include <stdlib.h>               // abort()
 #if defined(HAVE_PTHREAD_SIGMASK) && !defined(HAVE_BROKEN_PTHREAD_SIGMASK) && defined(HAVE_PTHREAD_H)
 #  include <pthread.h>
@@ -15,7 +18,7 @@
 #  include <windows.h>
 #endif
 #ifdef HAVE_SYS_RESOURCE_H
-#  include <sys/resource.h>
+#  include <sys/resource.h>       // setrlimit()
 #endif
 
 #if defined(FAULTHANDLER_USE_ALT_STACK) && defined(HAVE_LINUX_AUXVEC_H) && defined(HAVE_SYS_AUXV_H)
@@ -23,10 +26,11 @@
 #  include <sys/auxv.h>           // getauxval()
 #endif
 
+
 /* Allocate at maximum 100 MiB of the stack to raise the stack overflow */
 #define STACK_OVERFLOW_MAX_SIZE (100 * 1024 * 1024)
 
-#define PUTS(fd, str) _Py_write_noraise(fd, str, strlen(str))
+#define PUTS(fd, str) (void)_Py_write_noraise(fd, str, strlen(str))
 
 
 // clang uses __attribute__((no_sanitize("undefined")))
@@ -115,7 +119,7 @@ faulthandler_get_fileno(PyObject **file_ptr)
         }
     }
     else if (PyLong_Check(file)) {
-        fd = _PyLong_AsInt(file);
+        fd = PyLong_AsInt(file);
         if (fd == -1 && PyErr_Occurred())
             return -1;
         if (fd < 0) {
@@ -145,10 +149,7 @@ faulthandler_get_fileno(PyObject **file_ptr)
         return -1;
     }
 
-    result = PyObject_CallMethodNoArgs(file, &_Py_ID(flush));
-    if (result != NULL)
-        Py_DECREF(result);
-    else {
+    if (_PyFile_Flush(file) < 0) {
         /* ignore flush() error */
         PyErr_Clear();
     }
@@ -574,7 +575,7 @@ faulthandler_thread(void *unused)
         /* Timeout => dump traceback */
         assert(st == PY_LOCK_FAILURE);
 
-        _Py_write_noraise(thread.fd, thread.header, (int)thread.header_len);
+        (void)_Py_write_noraise(thread.fd, thread.header, (int)thread.header_len);
 
         errmsg = _Py_DumpTracebackThreads(thread.fd, thread.interp, NULL);
         ok = (errmsg == NULL);

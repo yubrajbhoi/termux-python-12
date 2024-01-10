@@ -1,5 +1,7 @@
 #include "Python.h"
 #include "pycore_object.h"
+#include "pycore_sysmodule.h"     // _PySys_GetSizeOf()
+
 #include <stddef.h>               // offsetof()
 #include "_iomodule.h"
 
@@ -988,7 +990,9 @@ static int
 bytesio_clear(bytesio *self)
 {
     Py_CLEAR(self->dict);
-    Py_CLEAR(self->buf);
+    if (self->exports == 0) {
+        Py_CLEAR(self->buf);
+    }
     return 0;
 }
 
@@ -1029,8 +1033,8 @@ static struct PyMethodDef bytesio_methods[] = {
 };
 
 static PyMemberDef bytesio_members[] = {
-    {"__weaklistoffset__", T_PYSSIZET, offsetof(bytesio, weakreflist), READONLY},
-    {"__dictoffset__", T_PYSSIZET, offsetof(bytesio, dict), READONLY},
+    {"__weaklistoffset__", Py_T_PYSSIZET, offsetof(bytesio, weakreflist), Py_READONLY},
+    {"__dictoffset__", Py_T_PYSSIZET, offsetof(bytesio, dict), Py_READONLY},
     {NULL}
 };
 
@@ -1094,13 +1098,6 @@ bytesiobuf_releasebuffer(bytesiobuf *obj, Py_buffer *view)
 }
 
 static int
-bytesiobuf_clear(bytesiobuf *self)
-{
-    Py_CLEAR(self->source);
-    return 0;
-}
-
-static int
 bytesiobuf_traverse(bytesiobuf *self, visitproc visit, void *arg)
 {
     Py_VISIT(Py_TYPE(self));
@@ -1114,7 +1111,7 @@ bytesiobuf_dealloc(bytesiobuf *self)
     PyTypeObject *tp = Py_TYPE(self);
     /* bpo-31095: UnTrack is needed before calling any callbacks */
     PyObject_GC_UnTrack(self);
-    (void)bytesiobuf_clear(self);
+    Py_CLEAR(self->source);
     tp->tp_free(self);
     Py_DECREF(tp);
 }
@@ -1122,7 +1119,6 @@ bytesiobuf_dealloc(bytesiobuf *self)
 static PyType_Slot bytesiobuf_slots[] = {
     {Py_tp_dealloc, bytesiobuf_dealloc},
     {Py_tp_traverse, bytesiobuf_traverse},
-    {Py_tp_clear, bytesiobuf_clear},
 
     // Buffer protocol
     {Py_bf_getbuffer, bytesiobuf_getbuffer},

@@ -11,7 +11,8 @@ import textwrap
 import warnings
 from test import support
 from test.support import (script_helper, requires_debug_ranges,
-                          requires_specialization, C_RECURSION_LIMIT)
+                          requires_specialization, Py_C_RECURSION_LIMIT)
+from test.support.bytecode_helper import instructions_with_positions
 from test.support.os_helper import FakePath
 
 class TestSpecifics(unittest.TestCase):
@@ -111,7 +112,7 @@ class TestSpecifics(unittest.TestCase):
 
     @unittest.skipIf(support.is_wasi, "exhausts limited stack on WASI")
     def test_extended_arg(self):
-        repeat = int(C_RECURSION_LIMIT * 0.9)
+        repeat = int(Py_C_RECURSION_LIMIT * 0.9)
         longexpr = 'x = x or ' + '-x' * repeat
         g = {}
         code = textwrap.dedent('''
@@ -443,6 +444,23 @@ class TestSpecifics(unittest.TestCase):
         self.assertIn("_A__mangled_mod", A.f.__code__.co_varnames)
         self.assertIn("__package__", A.f.__code__.co_varnames)
 
+    def test_condition_expression_with_dead_blocks_compiles(self):
+        # See gh-113054
+        compile('if (5 if 5 else T): 0', '<eval>', 'exec')
+
+    def test_condition_expression_with_redundant_comparisons_compiles(self):
+        # See gh-113054
+        compile('if 9<9<9and 9or 9:9', '<eval>', 'exec')
+
+    def test_dead_code_with_except_handler_compiles(self):
+        compile(textwrap.dedent("""
+                if None:
+                    with CM:
+                        x = 1
+                else:
+                    x = 2
+               """), '<eval>', 'exec')
+
     def test_compile_invalid_namedexpr(self):
         # gh-109351
         m = ast.Module(
@@ -604,12 +622,12 @@ class TestSpecifics(unittest.TestCase):
     @support.cpython_only
     @unittest.skipIf(support.is_wasi, "exhausts limited stack on WASI")
     def test_compiler_recursion_limit(self):
-        # Expected limit is C_RECURSION_LIMIT * 2
+        # Expected limit is Py_C_RECURSION_LIMIT * 2
         # Duplicating the limit here is a little ugly.
         # Perhaps it should be exposed somewhere...
-        fail_depth = C_RECURSION_LIMIT * 2 + 1
-        crash_depth = C_RECURSION_LIMIT * 100
-        success_depth = int(C_RECURSION_LIMIT * 1.8)
+        fail_depth = Py_C_RECURSION_LIMIT * 2 + 1
+        crash_depth = Py_C_RECURSION_LIMIT * 100
+        success_depth = int(Py_C_RECURSION_LIMIT * 1.8)
 
         def check_limit(prefix, repeated, mode="single"):
             expect_ok = prefix + repeated * success_depth
@@ -1243,6 +1261,15 @@ class TestSpecifics(unittest.TestCase):
             return a
         self.assertEqual(f("x", "y", "z"), "y")
 
+    def test_variable_dependent(self):
+        # gh-104635: Since the value of b is dependent on the value of a
+        # the first STORE_FAST for a should not be skipped. (e.g POP_TOP).
+        # This test case is added to prevent potential regression from aggressive optimization.
+        def f():
+            a = 42; b = a + 54; a = 54
+            return a, b
+        self.assertEqual(f(), (54, 96))
+
     def test_duplicated_small_exit_block(self):
         # See gh-109627
         def f():
@@ -1273,6 +1300,23 @@ class TestSpecifics(unittest.TestCase):
         # See gh-109889
         def f():
             a if (1 if b else c) else d
+
+    def test_global_declaration_in_except_used_in_else(self):
+        # See gh-111123
+        code = textwrap.dedent("""\
+            def f():
+                try:
+                    pass
+                %s Exception:
+                    global a
+                else:
+                    print(a)
+        """)
+
+        g, l = {'a': 5}, {}
+        for kw in ("except", "except*"):
+            exec(code % kw, g, l);
+
 
 @requires_debug_ranges()
 class TestSourcePositions(unittest.TestCase):
@@ -1320,8 +1364,8 @@ class TestSourcePositions(unittest.TestCase):
     def assertOpcodeSourcePositionIs(self, code, opcode,
             line, end_line, column, end_column, occurrence=1):
 
-        for instr, position in zip(
-            dis.Bytecode(code, show_caches=True), code.co_positions(), strict=True
+        for instr, position in instructions_with_positions(
+            dis.Bytecode(code), code.co_positions()
         ):
             if instr.opname == opcode:
                 occurrence -= 1
@@ -1398,18 +1442,18 @@ class TestSourcePositions(unittest.TestCase):
         snippet = textwrap.dedent("""\
             assert (a > 0 and
                     bb > 0 and
-                    ccc == 4), "error msg"
+                    ccc == 1000000), "error msg"
             """)
         compiled_code, _ = self.check_positions_against_ast(snippet)
         self.assertOpcodeSourcePositionIs(compiled_code, 'LOAD_ASSERTION_ERROR',
-            line=1, end_line=3, column=0, end_column=30, occurrence=1)
+            line=1, end_line=3, column=0, end_column=36, occurrence=1)
         #  The "error msg":
         self.assertOpcodeSourcePositionIs(compiled_code, 'LOAD_CONST',
-            line=3, end_line=3, column=19, end_column=30, occurrence=4)
+            line=3, end_line=3, column=25, end_column=36, occurrence=4)
         self.assertOpcodeSourcePositionIs(compiled_code, 'CALL',
-            line=1, end_line=3, column=0, end_column=30, occurrence=1)
+            line=1, end_line=3, column=0, end_column=36, occurrence=1)
         self.assertOpcodeSourcePositionIs(compiled_code, 'RAISE_VARARGS',
-            line=1, end_line=3, column=0, end_column=30, occurrence=1)
+            line=1, end_line=3, column=8, end_column=22, occurrence=1)
 
     def test_multiline_generator_expression(self):
         snippet = textwrap.dedent("""\

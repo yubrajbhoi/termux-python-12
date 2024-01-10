@@ -683,15 +683,12 @@ class SocketHandler(logging.Handler):
         """
         Closes the socket.
         """
-        self.acquire()
-        try:
+        with self.lock:
             sock = self.sock
             if sock:
                 self.sock = None
                 sock.close()
             logging.Handler.close(self)
-        finally:
-            self.release()
 
 class DatagramHandler(SocketHandler):
     """
@@ -951,15 +948,12 @@ class SysLogHandler(logging.Handler):
         """
         Closes the socket.
         """
-        self.acquire()
-        try:
+        with self.lock:
             sock = self.socket
             if sock:
                 self.socket = None
                 sock.close()
             logging.Handler.close(self)
-        finally:
-            self.release()
 
     def mapPriority(self, levelName):
         """
@@ -1331,11 +1325,8 @@ class BufferingHandler(logging.Handler):
 
         This version just zaps the buffer to empty.
         """
-        self.acquire()
-        try:
+        with self.lock:
             self.buffer.clear()
-        finally:
-            self.release()
 
     def close(self):
         """
@@ -1385,11 +1376,8 @@ class MemoryHandler(BufferingHandler):
         """
         Set the target handler for this handler.
         """
-        self.acquire()
-        try:
+        with self.lock:
             self.target = target
-        finally:
-            self.release()
 
     def flush(self):
         """
@@ -1399,14 +1387,11 @@ class MemoryHandler(BufferingHandler):
 
         The record buffer is only cleared if a target has been set.
         """
-        self.acquire()
-        try:
+        with self.lock:
             if self.target:
                 for record in self.buffer:
                     self.target.handle(record)
                 self.buffer.clear()
-        finally:
-            self.release()
 
     def close(self):
         """
@@ -1417,12 +1402,9 @@ class MemoryHandler(BufferingHandler):
             if self.flushOnClose:
                 self.flush()
         finally:
-            self.acquire()
-            try:
+            with self.lock:
                 self.target = None
                 BufferingHandler.close(self)
-            finally:
-                self.release()
 
 
 class QueueHandler(logging.Handler):

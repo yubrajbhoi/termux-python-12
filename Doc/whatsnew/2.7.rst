@@ -287,7 +287,7 @@ remains O(1).
 The standard library now supports use of ordered dictionaries in several
 modules.
 
-* The :mod:`ConfigParser` module uses them by default, meaning that
+* The :mod:`ConfigParser <configparser>` module uses them by default, meaning that
   configuration files can now be read, modified, and then written back
   in their original order.
 
@@ -858,9 +858,10 @@ Some smaller changes made to the core Python language are:
 
   .. XXX bytearray doesn't seem to be documented
 
-* When using ``@classmethod`` and ``@staticmethod`` to wrap
+* When using :class:`@classmethod <classmethod>` and
+  :class:`@staticmethod <staticmethod>` to wrap
   methods as class or static methods, the wrapper object now
-  exposes the wrapped function as their :ref:`__func__ <instance-methods>`
+  exposes the wrapped function as their :attr:`~method.__func__`
   attribute.
   (Contributed by Amaury Forgeot d'Arc, after a suggestion by
   George Sakkis; :issue:`5982`.)
@@ -1133,7 +1134,7 @@ changes, or look through the Subversion logs for all the details.
   another type that isn't a :class:`Mapping`.
   (Fixed by Daniel Stutzbach; :issue:`8729`.)
 
-* Constructors for the parsing classes in the :mod:`ConfigParser` module now
+* Constructors for the parsing classes in the :mod:`ConfigParser <configparser>` module now
   take an *allow_no_value* parameter, defaulting to false; if true,
   options without values will be allowed.  For example::
 
@@ -1314,9 +1315,9 @@ changes, or look through the Subversion logs for all the details.
   giving the source address that will be used for the connection.
   (Contributed by Eldon Ziegler; :issue:`3972`.)
 
-* The :mod:`ihooks` module now supports relative imports.  Note that
-  :mod:`ihooks` is an older module for customizing imports,
-  superseded by the :mod:`imputil` module added in Python 2.0.
+* The :mod:`!ihooks` module now supports relative imports.  Note that
+  :mod:`!ihooks` is an older module for customizing imports,
+  superseded by the :mod:`!imputil` module added in Python 2.0.
   (Relative import support added by Neil Schemenauer.)
 
   .. revision 75423
@@ -1416,7 +1417,7 @@ changes, or look through the Subversion logs for all the details.
   :func:`~math.lgamma` for the natural log of the Gamma function.
   (Contributed by Mark Dickinson and nirinA raseliarison; :issue:`3366`.)
 
-* The :mod:`multiprocessing` module's :class:`Manager*` classes
+* The :mod:`multiprocessing` module's :class:`!Manager*` classes
   can now be passed a callable that will be called whenever
   a subprocess is started, along with a set of arguments that will be
   passed to the callable.
@@ -1430,7 +1431,7 @@ changes, or look through the Subversion logs for all the details.
   become very large.
   (Contributed by Charles Cazabon; :issue:`6963`.)
 
-* The :mod:`nntplib` module now supports IPv6 addresses.
+* The :mod:`!nntplib` module now supports IPv6 addresses.
   (Contributed by Derek Morr; :issue:`1664`.)
 
 * New functions: the :mod:`os` module wraps the following POSIX system
@@ -2156,13 +2157,13 @@ Changes to Python's build process and to the C API include:
   :c:func:`!PyOS_ascii_strtod` and :c:func:`!PyOS_ascii_atof` functions
   are now deprecated.
 
-* New function: :c:func:`PySys_SetArgvEx` sets the value of
+* New function: :c:func:`!PySys_SetArgvEx` sets the value of
   ``sys.argv`` and can optionally update ``sys.path`` to include the
   directory containing the script named by ``sys.argv[0]`` depending
   on the value of an *updatepath* parameter.
 
   This function was added to close a security hole for applications
-  that embed Python.  The old function, :c:func:`PySys_SetArgv`, would
+  that embed Python.  The old function, :c:func:`!PySys_SetArgv`, would
   always update ``sys.path``, and sometimes it would add the current
   directory.  This meant that, if you ran an application embedding
   Python in a directory controlled by someone else, attackers could
@@ -2170,8 +2171,8 @@ Changes to Python's build process and to the C API include:
   :file:`os.py`) that your application would then import and run.
 
   If you maintain a C/C++ application that embeds Python, check
-  whether you're calling :c:func:`PySys_SetArgv` and carefully consider
-  whether the application should be using :c:func:`PySys_SetArgvEx`
+  whether you're calling :c:func:`!PySys_SetArgv` and carefully consider
+  whether the application should be using :c:func:`!PySys_SetArgvEx`
   with *updatepath* set to false.
 
   Security issue reported as `CVE-2008-5983
@@ -2546,11 +2547,11 @@ For C extensions:
 
 For applications that embed Python:
 
-* The :c:func:`PySys_SetArgvEx` function was added, letting
+* The :c:func:`!PySys_SetArgvEx` function was added, letting
   applications close a security hole when the existing
-  :c:func:`PySys_SetArgv` function was used.  Check whether you're
-  calling :c:func:`PySys_SetArgv` and carefully consider whether the
-  application should be using :c:func:`PySys_SetArgvEx` with
+  :c:func:`!PySys_SetArgv` function was used.  Check whether you're
+  calling :c:func:`!PySys_SetArgv` and carefully consider whether the
+  application should be using :c:func:`!PySys_SetArgvEx` with
   *updatepath* set to false.
 
 .. ======================================================================

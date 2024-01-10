@@ -4,13 +4,12 @@
 
 #include "Python.h"
 #include "pycore_long.h"          // _PyLong_GetOne()
-#include "structmember.h"
+#include "pycore_pyerrors.h"      // _PyErr_ChainExceptions1()
 
-#include <ctype.h>
-#include <stddef.h>
+#include "datetime.h"             // PyDateTime_TZInfo
+
+#include <stddef.h>               // offsetof()
 #include <stdint.h>
-
-#include "datetime.h"
 
 #include "clinic/_zoneinfo.c.h"
 /*[clinic input]
@@ -421,7 +420,7 @@ zoneinfo_ZoneInfo_from_file_impl(PyTypeObject *type, PyTypeObject *cls,
         return NULL;
     }
 
-    file_repr = PyUnicode_FromFormat("%R", file_obj);
+    file_repr = PyObject_Repr(file_obj);
     if (file_repr == NULL) {
         goto error;
     }
@@ -817,7 +816,7 @@ zoneinfo_ZoneInfo__unpickle_impl(PyTypeObject *type, PyTypeObject *cls,
 /*[clinic end generated code: output=556712fc709deecb input=6ac8c73eed3de316]*/
 {
     if (from_cache) {
-        PyObject *val_args = Py_BuildValue("(O)", key);
+        PyObject *val_args = PyTuple_Pack(1, key);
         if (val_args == NULL) {
             return NULL;
         }
@@ -1735,7 +1734,7 @@ parse_abbr(const char **p, PyObject **abbr)
             //   '+' ) character, or the minus-sign ( '-' ) character. The std
             //   and dst fields in this case shall not include the quoting
             //   characters.
-            if (!isalpha(buff) && !isdigit(buff) && buff != '+' &&
+            if (!Py_ISALPHA(buff) && !Py_ISDIGIT(buff) && buff != '+' &&
                 buff != '-') {
                 return -1;
             }
@@ -1751,7 +1750,7 @@ parse_abbr(const char **p, PyObject **abbr)
         //   In the unquoted form, all characters in these fields shall be
         //   alphabetic characters from the portable character set in the
         //   current locale.
-        while (isalpha(*ptr)) {
+        while (Py_ISALPHA(*ptr)) {
             ptr++;
         }
         str_end = ptr;
@@ -2319,7 +2318,12 @@ get_local_timestamp(PyObject *dt, int64_t *local_ts)
 /////
 // Functions for cache handling
 
-/* Constructor for StrongCacheNode */
+/* Constructor for StrongCacheNode
+ *
+ * This function doesn't set MemoryError if PyMem_Malloc fails,
+ * as the cache intentionally doesn't propagate exceptions
+ * and fails silently if error occurs.
+ */
 static StrongCacheNode *
 strong_cache_node_new(PyObject *key, PyObject *zone)
 {
@@ -2510,6 +2514,9 @@ update_strong_cache(zoneinfo_state *state, const PyTypeObject *const type,
     }
 
     StrongCacheNode *new_node = strong_cache_node_new(key, zone);
+    if (new_node == NULL) {
+        return;
+    }
     StrongCacheNode **root = &(state->ZONEINFO_STRONG_CACHE);
     move_strong_cache_node_to_front(state, root, new_node);
 
@@ -2617,13 +2624,13 @@ static PyMethodDef zoneinfo_methods[] = {
 static PyMemberDef zoneinfo_members[] = {
     {.name = "key",
      .offset = offsetof(PyZoneInfo_ZoneInfo, key),
-     .type = T_OBJECT_EX,
-     .flags = READONLY,
+     .type = Py_T_OBJECT_EX,
+     .flags = Py_READONLY,
      .doc = NULL},
     {.name = "__weaklistoffset__",
      .offset = offsetof(PyZoneInfo_ZoneInfo, weakreflist),
-     .type = T_PYSSIZET,
-     .flags = READONLY},
+     .type = Py_T_PYSSIZET,
+     .flags = Py_READONLY},
     {NULL}, /* Sentinel */
 };
 

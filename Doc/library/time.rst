@@ -381,6 +381,8 @@ Functions
    * Or use ``nanosleep()`` if available (resolution: 1 nanosecond);
    * Or use ``select()`` (resolution: 1 microsecond).
 
+   .. audit-event:: time.sleep secs
+
    .. versionchanged:: 3.11
       On Unix, the ``clock_nanosleep()`` and ``nanosleep()`` functions are now
       used if available. On Windows, a waitable timer is now used.
@@ -390,6 +392,9 @@ Functions
       by a signal, except if the signal handler raises an exception (see
       :pep:`475` for the rationale).
 
+
+   .. versionchanged:: 3.13
+      Raises an auditing event.
 
 .. index::
    single: % (percent); datetime format
@@ -835,6 +840,15 @@ These constants are used as parameters for :func:`clock_getres` and
 
    .. versionadded:: 3.3
 
+.. data:: CLOCK_MONOTONIC_RAW_APPROX
+
+   Similar to :data:`CLOCK_MONOTONIC_RAW`, but reads a value cached by
+   the system at context switch and hence has less accuracy.
+
+   .. availability:: macOS >= 10.12.
+
+   .. versionadded:: 3.13
+
 
 .. data:: CLOCK_PROCESS_CPUTIME_ID
 
@@ -893,6 +907,15 @@ These constants are used as parameters for :func:`clock_getres` and
    .. availability:: macOS >= 10.12.
 
    .. versionadded:: 3.8
+
+.. data:: CLOCK_UPTIME_RAW_APPROX
+
+   Like :data:`CLOCK_UPTIME_RAW`, but the value is cached by the system
+   at context switches and therefore has less accuracy.
+
+   .. availability:: macOS >= 10.12.
+
+   .. versionadded:: 3.13
 
 The following constant is the only parameter that can be sent to
 :func:`clock_settime`.

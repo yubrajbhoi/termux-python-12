@@ -24,7 +24,7 @@ NAN = float("nan")
 
 #locate file with float format test values
 test_dir = os.path.dirname(__file__) or os.curdir
-format_testfile = os.path.join(test_dir, 'formatfloat_testcases.txt')
+format_testfile = os.path.join(test_dir, 'mathdata', 'formatfloat_testcases.txt')
 
 class FloatSubclass(float):
     pass
@@ -767,6 +767,7 @@ class FormatTestCase(unittest.TestCase):
 class ReprTestCase(unittest.TestCase):
     def test_repr(self):
         with open(os.path.join(os.path.split(__file__)[0],
+                  'mathdata',
                   'floating_points.txt'), encoding="utf-8") as floats_file:
             for line in floats_file:
                 line = line.strip()

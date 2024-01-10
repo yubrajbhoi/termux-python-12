@@ -585,7 +585,7 @@ However, for reading convenience, most of the examples show sorted sequences.
 
    The *data* can be any iterable containing sample data.  For meaningful
    results, the number of data points in *data* should be larger than *n*.
-   Raises :exc:`StatisticsError` if there are not at least two data points.
+   Raises :exc:`StatisticsError` if there is not at least one data point.
 
    The cut points are linearly interpolated from the
    two nearest data points.  For example, if a cut point falls one-third
@@ -624,6 +624,11 @@ However, for reading convenience, most of the examples show sorted sequences.
         [81.0, 86.2, 89.0, 99.4, 102.5, 103.6, 106.0, 109.8, 111.0]
 
    .. versionadded:: 3.8
+
+   .. versionchanged:: 3.13
+      No longer raises an exception for an input with only a single data point.
+      This allows quantile estimates to be built up one sample point
+      at a time becoming gradually more refined with each new data point.
 
 .. function:: covariance(x, y, /)
 
@@ -847,6 +852,11 @@ of applications in statistics.
        number generator.  This is useful for creating reproducible results,
        even in a multi-threading context.
 
+       .. versionchanged:: 3.13
+
+       Switched to a faster algorithm.  To reproduce samples from previous
+       versions, use :func:`random.seed` and :func:`random.gauss`.
+
     .. method:: NormalDist.pdf(x)
 
        Using a `probability density function (pdf)
@@ -1016,19 +1026,16 @@ probability that the Python room will stay within its capacity limits?
     >>> round(NormalDist(mu=n*p, sigma=sqrt(n*p*q)).cdf(k + 0.5), 4)
     0.8402
 
-    >>> # Solution using the cumulative binomial distribution
+    >>> # Exact solution using the cumulative binomial distribution
     >>> from math import comb, fsum
     >>> round(fsum(comb(n, r) * p**r * q**(n-r) for r in range(k+1)), 4)
     0.8402
 
     >>> # Approximation using a simulation
-    >>> from random import seed, choices
+    >>> from random import seed, binomialvariate
     >>> seed(8675309)
-    >>> def trial():
-    ...     return choices(('Python', 'Ruby'), (p, q), k=n).count('Python')
-    ...
-    >>> mean(trial() <= k for i in range(10_000))
-    0.8398
+    >>> mean(binomialvariate(n, p) <= k for i in range(10_000))
+    0.8406
 
 
 Naive bayesian classifier

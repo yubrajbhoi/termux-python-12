@@ -1,4 +1,3 @@
-#define PY_SSIZE_T_CLEAN
 #include "parts.h"
 #include "util.h"
 
@@ -54,6 +53,19 @@ dict_contains(PyObject *self, PyObject *args)
     NULLABLE(obj);
     NULLABLE(key);
     RETURN_INT(PyDict_Contains(obj, key));
+}
+
+static PyObject *
+dict_containsstring(PyObject *self, PyObject *args)
+{
+    PyObject *obj;
+    const char *key;
+    Py_ssize_t size;
+    if (!PyArg_ParseTuple(args, "Oz#", &obj, &key, &size)) {
+        return NULL;
+    }
+    NULLABLE(obj);
+    RETURN_INT(PyDict_ContainsString(obj, key));
 }
 
 static PyObject *
@@ -119,6 +131,58 @@ dict_getitemwitherror(PyObject *self, PyObject *args)
         return Py_NewRef(PyExc_KeyError);
     }
     return Py_NewRef(value);
+}
+
+
+static PyObject *
+dict_getitemref(PyObject *self, PyObject *args)
+{
+    PyObject *obj, *attr_name, *value = UNINITIALIZED_PTR;
+    if (!PyArg_ParseTuple(args, "OO", &obj, &attr_name)) {
+        return NULL;
+    }
+    NULLABLE(obj);
+    NULLABLE(attr_name);
+
+    switch (PyDict_GetItemRef(obj, attr_name, &value)) {
+        case -1:
+            assert(value == NULL);
+            return NULL;
+        case 0:
+            assert(value == NULL);
+            return Py_NewRef(PyExc_KeyError);
+        case 1:
+            return value;
+        default:
+            Py_FatalError("PyMapping_GetItemRef() returned invalid code");
+            Py_UNREACHABLE();
+    }
+}
+
+static PyObject *
+dict_getitemstringref(PyObject *self, PyObject *args)
+{
+    PyObject *obj, *value = UNINITIALIZED_PTR;
+    const char *attr_name;
+    Py_ssize_t size;
+    if (!PyArg_ParseTuple(args, "Oz#", &obj, &attr_name, &size)) {
+        return NULL;
+    }
+    NULLABLE(obj);
+
+    switch (PyDict_GetItemStringRef(obj, attr_name, &value)) {
+        case -1:
+            assert(value == NULL);
+            return NULL;
+        case 0:
+            assert(value == NULL);
+            return Py_NewRef(PyExc_KeyError);
+        case 1:
+            return value;
+        default:
+            Py_FatalError("PyDict_GetItemStringRef() returned invalid code");
+            Py_UNREACHABLE();
+    }
 }
 
 static PyObject *
@@ -267,6 +331,88 @@ dict_mergefromseq2(PyObject *self, PyObject *args)
 }
 
 
+static PyObject *
+dict_pop(PyObject *self, PyObject *args)
+{
+    // Test PyDict_Pop(dict, key, &value)
+    PyObject *dict, *key;
+    if (!PyArg_ParseTuple(args, "OO", &dict, &key)) {
+        return NULL;
+    }
+    NULLABLE(dict);
+    NULLABLE(key);
+    PyObject *result = UNINITIALIZED_PTR;
+    int res = PyDict_Pop(dict, key,  &result);
+    if (res < 0) {
+        assert(result == NULL);
+        return NULL;
+    }
+    if (res == 0) {
+        assert(result == NULL);
+        result = Py_NewRef(Py_None);
+    }
+    else {
+        assert(result != NULL);
+    }
+    return Py_BuildValue("iN", res, result);
+}
+
+
+static PyObject *
+dict_pop_null(PyObject *self, PyObject *args)
+{
+    // Test PyDict_Pop(dict, key, NULL)
+    PyObject *dict, *key;
+    if (!PyArg_ParseTuple(args, "OO", &dict, &key)) {
+        return NULL;
+    }
+    NULLABLE(dict);
+    NULLABLE(key);
+    RETURN_INT(PyDict_Pop(dict, key,  NULL));
+}
+
+
+static PyObject *
+dict_popstring(PyObject *self, PyObject *args)
+{
+    PyObject *dict;
+    const char *key;
+    Py_ssize_t key_size;
+    if (!PyArg_ParseTuple(args, "Oz#", &dict, &key, &key_size)) {
+        return NULL;
+    }
+    NULLABLE(dict);
+    PyObject *result = UNINITIALIZED_PTR;
+    int res = PyDict_PopString(dict, key,  &result);
+    if (res < 0) {
+        assert(result == NULL);
+        return NULL;
+    }
+    if (res == 0) {
+        assert(result == NULL);
+        result = Py_NewRef(Py_None);
+    }
+    else {
+        assert(result != NULL);
+    }
+    return Py_BuildValue("iN", res, result);
+}
+
+
+static PyObject *
+dict_popstring_null(PyObject *self, PyObject *args)
+{
+    PyObject *dict;
+    const char *key;
+    Py_ssize_t key_size;
+    if (!PyArg_ParseTuple(args, "Oz#", &dict, &key, &key_size)) {
+        return NULL;
+    }
+    NULLABLE(dict);
+    RETURN_INT(PyDict_PopString(dict, key,  NULL));
+}
+
+
 static PyMethodDef test_methods[] = {
     {"dict_check", dict_check, METH_O},
     {"dict_checkexact", dict_checkexact, METH_O},
@@ -278,7 +424,10 @@ static PyMethodDef test_methods[] = {
     {"dict_getitem", dict_getitem, METH_VARARGS},
     {"dict_getitemwitherror", dict_getitemwitherror, METH_VARARGS},
     {"dict_getitemstring", dict_getitemstring, METH_VARARGS},
+    {"dict_getitemref", dict_getitemref, METH_VARARGS},
+    {"dict_getitemstringref", dict_getitemstringref, METH_VARARGS},
     {"dict_contains", dict_contains, METH_VARARGS},
+    {"dict_containsstring", dict_containsstring, METH_VARARGS},
     {"dict_setitem", dict_setitem, METH_VARARGS},
     {"dict_setitemstring", dict_setitemstring, METH_VARARGS},
     {"dict_delitem", dict_delitem, METH_VARARGS},
@@ -291,7 +440,10 @@ static PyMethodDef test_methods[] = {
     {"dict_merge", dict_merge, METH_VARARGS},
     {"dict_update", dict_update, METH_VARARGS},
     {"dict_mergefromseq2", dict_mergefromseq2, METH_VARARGS},
-
+    {"dict_pop", dict_pop, METH_VARARGS},
+    {"dict_pop_null", dict_pop_null, METH_VARARGS},
+    {"dict_popstring", dict_popstring, METH_VARARGS},
+    {"dict_popstring_null", dict_popstring_null, METH_VARARGS},
     {NULL},
 };
 

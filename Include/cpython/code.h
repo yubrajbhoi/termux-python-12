@@ -16,10 +16,8 @@ extern "C" {
 #define _PY_MONITORING_EVENTS 17
 
 /* Tables of which tools are active for each monitored event. */
-/* For 3.12 ABI compatibility this is over sized */
 typedef struct _Py_LocalMonitors {
-    /* Only _PY_MONITORING_LOCAL_EVENTS of these are used */
-    uint8_t tools[_PY_MONITORING_UNGROUPED_EVENTS];
+    uint8_t tools[_PY_MONITORING_LOCAL_EVENTS];
 } _Py_LocalMonitors;
 
 typedef struct _Py_GlobalMonitors {
@@ -82,6 +80,13 @@ typedef struct {
     uint8_t original_opcode;
     int8_t line_delta;
 } _PyCoLineInstrumentationData;
+
+
+typedef struct {
+    int size;
+    int capacity;
+    struct _PyExecutorObject *executors[1];
+} _PyExecutorArray;
 
 /* Main data structure used for instrumentation.
  * This is allocated when needed for instrumentation
@@ -160,8 +165,9 @@ typedef struct {
     PyObject *co_qualname;        /* unicode (qualname, for reference) */      \
     PyObject *co_linetable;       /* bytes object that holds location info */  \
     PyObject *co_weakreflist;     /* to support weakrefs to code objects */    \
+    _PyExecutorArray *co_executors;      /* executors from optimizer */        \
     _PyCoCached *_co_cached;      /* cached co_* attributes */                 \
-    uint64_t _co_instrumentation_version; /* current instrumentation version */  \
+    uintptr_t _co_instrumentation_version; /* current instrumentation version */ \
     _PyCoMonitoringData *_co_monitoring; /* Monitoring data */                 \
     int _co_firsttraceable;       /* index of first traceable instruction */   \
     /* Scratch space for extra data relating to the code object.               \
@@ -201,6 +207,8 @@ struct PyCodeObject _PyCode_DEF(1);
 #define CO_FUTURE_BARRY_AS_BDFL  0x400000
 #define CO_FUTURE_GENERATOR_STOP  0x800000
 #define CO_FUTURE_ANNOTATIONS    0x1000000
+
+#define CO_NO_MONITORING_EVENTS 0x2000000
 
 /* This should be defined if a future statement modifies the syntax.
    For example, when a keyword is added.

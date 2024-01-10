@@ -9,7 +9,6 @@ import itertools
 import pickle
 import re
 import sys
-import warnings
 from unittest import TestCase, main, skip
 from unittest.mock import patch
 from copy import copy, deepcopy
@@ -24,9 +23,9 @@ from typing import Callable
 from typing import Generic, ClassVar, Final, final, Protocol
 from typing import assert_type, cast, runtime_checkable
 from typing import get_type_hints
-from typing import get_origin, get_args
+from typing import get_origin, get_args, get_protocol_members
 from typing import override
-from typing import is_typeddict
+from typing import is_typeddict, is_protocol
 from typing import reveal_type
 from typing import dataclass_transform
 from typing import no_type_check, no_type_check_decorator
@@ -45,7 +44,7 @@ import typing
 import weakref
 import types
 
-from test.support import captured_stderr, cpython_only
+from test.support import captured_stderr, cpython_only, infinite_recursion
 from test.typinganndata import mod_generics_cache, _typed_dict_helper
 
 
@@ -3449,8 +3448,20 @@ class ProtocolTests(BaseTestCase):
 
         self.assertNotIn("__protocol_attrs__", vars(NonP))
         self.assertNotIn("__protocol_attrs__", vars(NonPR))
-        self.assertNotIn("__callable_proto_members_only__", vars(NonP))
-        self.assertNotIn("__callable_proto_members_only__", vars(NonPR))
+        self.assertNotIn("__non_callable_proto_members__", vars(NonP))
+        self.assertNotIn("__non_callable_proto_members__", vars(NonPR))
+
+        self.assertEqual(get_protocol_members(P), {"x"})
+        self.assertEqual(get_protocol_members(PR), {"meth"})
+
+        # the returned object should be immutable,
+        # and should be a different object to the original attribute
+        # to prevent users from (accidentally or deliberately)
+        # mutating the attribute on the original class
+        self.assertIsInstance(get_protocol_members(P), frozenset)
+        self.assertIsNot(get_protocol_members(P), P.__protocol_attrs__)
+        self.assertIsInstance(get_protocol_members(PR), frozenset)
+        self.assertIsNot(get_protocol_members(PR), P.__protocol_attrs__)
 
         acceptable_extra_attrs = {
             '_is_protocol', '_is_runtime_protocol', '__parameters__',
@@ -3522,13 +3533,26 @@ class ProtocolTests(BaseTestCase):
 
     def test_issubclass_fails_correctly(self):
         @runtime_checkable
-        class P(Protocol):
+        class NonCallableMembers(Protocol):
             x = 1
+
+        class NotRuntimeCheckable(Protocol):
+            def callable_member(self) -> int: ...
+
+        @runtime_checkable
+        class RuntimeCheckable(Protocol):
+            def callable_member(self) -> int: ...
 
         class C: pass
 
-        with self.assertRaisesRegex(TypeError, r"issubclass\(\) arg 1 must be a class"):
-            issubclass(C(), P)
+        # These three all exercise different code paths,
+        # but should result in the same error message:
+        for protocol in NonCallableMembers, NotRuntimeCheckable, RuntimeCheckable:
+            with self.subTest(proto_name=protocol.__name__):
+                with self.assertRaisesRegex(
+                    TypeError, r"issubclass\(\) arg 1 must be a class"
+                ):
+                    issubclass(C(), protocol)
 
     def test_defining_generic_protocols(self):
         T = TypeVar('T')
@@ -3794,6 +3818,39 @@ class ProtocolTests(BaseTestCase):
 
             self.assertIsInstance(E(), D)
 
+    def test_runtime_checkable_with_match_args(self):
+        @runtime_checkable
+        class P_regular(Protocol):
+            x: int
+            y: int
+
+        @runtime_checkable
+        class P_match(Protocol):
+            __match_args__ = ('x', 'y')
+            x: int
+            y: int
+
+        class Regular:
+            def __init__(self, x: int, y: int):
+                self.x = x
+                self.y = y
+
+        class WithMatch:
+            __match_args__ = ('x', 'y', 'z')
+            def __init__(self, x: int, y: int, z: int):
+                self.x = x
+                self.y = y
+                self.z = z
+
+        class Nope: ...
+
+        self.assertIsInstance(Regular(1, 2), P_regular)
+        self.assertIsInstance(Regular(1, 2), P_match)
+        self.assertIsInstance(WithMatch(1, 2, 3), P_regular)
+        self.assertIsInstance(WithMatch(1, 2, 3), P_match)
+        self.assertNotIsInstance(Nope(), P_regular)
+        self.assertNotIsInstance(Nope(), P_match)
+
     def test_supports_int(self):
         self.assertIsSubclass(int, typing.SupportsInt)
         self.assertNotIsSubclass(str, typing.SupportsInt)
@@ -3907,6 +3964,59 @@ class ProtocolTests(BaseTestCase):
 
         Foo()  # Previously triggered RecursionError
 
+    def test_get_protocol_members(self):
+        with self.assertRaisesRegex(TypeError, "not a Protocol"):
+            get_protocol_members(object)
+        with self.assertRaisesRegex(TypeError, "not a Protocol"):
+            get_protocol_members(object())
+        with self.assertRaisesRegex(TypeError, "not a Protocol"):
+            get_protocol_members(Protocol)
+        with self.assertRaisesRegex(TypeError, "not a Protocol"):
+            get_protocol_members(Generic)
+
+        class P(Protocol):
+            a: int
+            def b(self) -> str: ...
+            @property
+            def c(self) -> int: ...
+
+        self.assertEqual(get_protocol_members(P), {'a', 'b', 'c'})
+        self.assertIsInstance(get_protocol_members(P), frozenset)
+        self.assertIsNot(get_protocol_members(P), P.__protocol_attrs__)
+
+        class Concrete:
+            a: int
+            def b(self) -> str: return "capybara"
+            @property
+            def c(self) -> int: return 5
+
+        with self.assertRaisesRegex(TypeError, "not a Protocol"):
+            get_protocol_members(Concrete)
+        with self.assertRaisesRegex(TypeError, "not a Protocol"):
+            get_protocol_members(Concrete())
+
+        class ConcreteInherit(P):
+            a: int = 42
+            def b(self) -> str: return "capybara"
+            @property
+            def c(self) -> int: return 5
+
+        with self.assertRaisesRegex(TypeError, "not a Protocol"):
+            get_protocol_members(ConcreteInherit)
+        with self.assertRaisesRegex(TypeError, "not a Protocol"):
+            get_protocol_members(ConcreteInherit())
+
+    def test_is_protocol(self):
+        self.assertTrue(is_protocol(Proto))
+        self.assertTrue(is_protocol(Point))
+        self.assertFalse(is_protocol(Concrete))
+        self.assertFalse(is_protocol(Concrete()))
+        self.assertFalse(is_protocol(Generic))
+        self.assertFalse(is_protocol(object))
+
+        # Protocol is not itself a protocol
+        self.assertFalse(is_protocol(Protocol))
+
     def test_interaction_with_isinstance_checks_on_superclasses_with_ABCMeta(self):
         # Ensure the cache is empty, or this test won't work correctly
         collections.abc.Sized._abc_registry_clear()
@@ -3994,6 +4104,56 @@ class ProtocolTests(BaseTestCase):
         self.assertIsInstance(Foo(), ProtocolWithMixedMembers)
         self.assertNotIsInstance(42, ProtocolWithMixedMembers)
 
+    def test_protocol_issubclass_error_message(self):
+        @runtime_checkable
+        class Vec2D(Protocol):
+            x: float
+            y: float
+
+            def square_norm(self) -> float:
+                return self.x ** 2 + self.y ** 2
+
+        self.assertEqual(Vec2D.__protocol_attrs__, {'x', 'y', 'square_norm'})
+        expected_error_message = (
+            "Protocols with non-method members don't support issubclass()."
+            " Non-method members: 'x', 'y'."
+        )
+        with self.assertRaisesRegex(TypeError, re.escape(expected_error_message)):
+            issubclass(int, Vec2D)
+
+    def test_nonruntime_protocol_interaction_with_evil_classproperty(self):
+        class classproperty:
+            def __get__(self, instance, type):
+                raise RuntimeError("NO")
+
+        class Commentable(Protocol):
+            evil = classproperty()
+
+        # recognised as a protocol attr,
+        # but not actually accessed by the protocol metaclass
+        # (which would raise RuntimeError) for non-runtime protocols.
+        # See gh-113320
+        self.assertEqual(get_protocol_members(Commentable), {"evil"})
+
+    def test_runtime_protocol_interaction_with_evil_classproperty(self):
+        class CustomError(Exception): pass
+
+        class classproperty:
+            def __get__(self, instance, type):
+                raise CustomError
+
+        with self.assertRaises(TypeError) as cm:
+            @runtime_checkable
+            class Commentable(Protocol):
+                evil = classproperty()
+
+        exc = cm.exception
+        self.assertEqual(
+            exc.args[0],
+            "Failed to determine whether protocol member 'evil' is a method member"
+        )
+        self.assertIs(type(exc.__cause__), CustomError)
+
 
 class GenericTests(BaseTestCase):
 
@@ -4040,6 +4200,22 @@ class GenericTests(BaseTestCase):
         class D(Generic[T]): pass
         with self.assertRaises(TypeError):
             D[()]
+
+    def test_generic_subclass_checks(self):
+        for typ in [list[int], List[int],
+                    tuple[int, str], Tuple[int, str],
+                    typing.Callable[..., None],
+                    collections.abc.Callable[..., None]]:
+            with self.subTest(typ=typ):
+                self.assertRaises(TypeError, issubclass, typ, object)
+                self.assertRaises(TypeError, issubclass, typ, type)
+                self.assertRaises(TypeError, issubclass, typ, typ)
+                self.assertRaises(TypeError, issubclass, object, typ)
+
+                # isinstance is fine:
+                self.assertTrue(isinstance(typ, object))
+                # but, not when the right arg is also a generic:
+                self.assertRaises(TypeError, isinstance, typ, typ)
 
     def test_init(self):
         T = TypeVar('T')
@@ -5508,10 +5684,11 @@ class ForwardRefTests(BaseTestCase):
         def cmp(o1, o2):
             return o1 == o2
 
-        r1 = namespace1()
-        r2 = namespace2()
-        self.assertIsNot(r1, r2)
-        self.assertRaises(RecursionError, cmp, r1, r2)
+        with infinite_recursion():
+            r1 = namespace1()
+            r2 = namespace2()
+            self.assertIsNot(r1, r2)
+            self.assertRaises(RecursionError, cmp, r1, r2)
 
     def test_union_forward_recursion(self):
         ValueList = List['Value']
@@ -5744,10 +5921,14 @@ class ForwardRefTests(BaseTestCase):
                 get_type_hints(clazz)
 
     def test_meta_no_type_check(self):
-
-        @no_type_check_decorator
-        def magic_decorator(func):
-            return func
+        depr_msg = (
+            "'typing.no_type_check_decorator' is deprecated "
+            "and slated for removal in Python 3.15"
+        )
+        with self.assertWarnsRegex(DeprecationWarning, depr_msg):
+            @no_type_check_decorator
+            def magic_decorator(func):
+                return func
 
         self.assertEqual(magic_decorator.__name__, 'magic_decorator')
 
@@ -7255,18 +7436,47 @@ class NamedTupleTests(BaseTestCase):
         self.assertEqual(a, (1, [2]))
 
     def test_namedtuple_keyword_usage(self):
-        LocalEmployee = NamedTuple("LocalEmployee", name=str, age=int)
+        with self.assertWarnsRegex(
+            DeprecationWarning,
+            "Creating NamedTuple classes using keyword arguments is deprecated"
+        ):
+            LocalEmployee = NamedTuple("LocalEmployee", name=str, age=int)
+
         nick = LocalEmployee('Nick', 25)
         self.assertIsInstance(nick, tuple)
         self.assertEqual(nick.name, 'Nick')
         self.assertEqual(LocalEmployee.__name__, 'LocalEmployee')
         self.assertEqual(LocalEmployee._fields, ('name', 'age'))
         self.assertEqual(LocalEmployee.__annotations__, dict(name=str, age=int))
-        with self.assertRaises(TypeError):
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "Either list of fields or keywords can be provided to NamedTuple, not both"
+        ):
             NamedTuple('Name', [('x', int)], y=str)
 
+        with self.assertRaisesRegex(
+            TypeError,
+            "Either list of fields or keywords can be provided to NamedTuple, not both"
+        ):
+            NamedTuple('Name', [], y=str)
+
+        with self.assertRaisesRegex(
+            TypeError,
+            (
+                r"Cannot pass `None` as the 'fields' parameter "
+                r"and also specify fields using keyword arguments"
+            )
+        ):
+            NamedTuple('Name', None, x=int)
+
     def test_namedtuple_special_keyword_names(self):
-        NT = NamedTuple("NT", cls=type, self=object, typename=str, fields=list)
+        with self.assertWarnsRegex(
+            DeprecationWarning,
+            "Creating NamedTuple classes using keyword arguments is deprecated"
+        ):
+            NT = NamedTuple("NT", cls=type, self=object, typename=str, fields=list)
+
         self.assertEqual(NT.__name__, 'NT')
         self.assertEqual(NT._fields, ('cls', 'self', 'typename', 'fields'))
         a = NT(cls=str, self=42, typename='foo', fields=[('bar', tuple)])
@@ -7276,12 +7486,32 @@ class NamedTupleTests(BaseTestCase):
         self.assertEqual(a.fields, [('bar', tuple)])
 
     def test_empty_namedtuple(self):
-        NT = NamedTuple('NT')
+        expected_warning = re.escape(
+            "Failing to pass a value for the 'fields' parameter is deprecated "
+            "and will be disallowed in Python 3.15. "
+            "To create a NamedTuple class with 0 fields "
+            "using the functional syntax, "
+            "pass an empty list, e.g. `NT1 = NamedTuple('NT1', [])`."
+        )
+        with self.assertWarnsRegex(DeprecationWarning, fr"^{expected_warning}$"):
+            NT1 = NamedTuple('NT1')
+
+        expected_warning = re.escape(
+            "Passing `None` as the 'fields' parameter is deprecated "
+            "and will be disallowed in Python 3.15. "
+            "To create a NamedTuple class with 0 fields "
+            "using the functional syntax, "
+            "pass an empty list, e.g. `NT2 = NamedTuple('NT2', [])`."
+        )
+        with self.assertWarnsRegex(DeprecationWarning, fr"^{expected_warning}$"):
+            NT2 = NamedTuple('NT2', None)
+
+        NT3 = NamedTuple('NT2', [])
 
         class CNT(NamedTuple):
             pass  # empty body
 
-        for struct in [NT, CNT]:
+        for struct in NT1, NT2, NT3, CNT:
             with self.subTest(struct=struct):
                 self.assertEqual(struct._fields, ())
                 self.assertEqual(struct._field_defaults, {})
@@ -7291,13 +7521,29 @@ class NamedTupleTests(BaseTestCase):
     def test_namedtuple_errors(self):
         with self.assertRaises(TypeError):
             NamedTuple.__new__()
-        with self.assertRaises(TypeError):
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "missing 1 required positional argument"
+        ):
             NamedTuple()
-        with self.assertRaises(TypeError):
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "takes from 1 to 2 positional arguments but 3 were given"
+        ):
             NamedTuple('Emp', [('name', str)], None)
-        with self.assertRaises(ValueError):
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Field names cannot start with an underscore"
+        ):
             NamedTuple('Emp', [('_name', str)])
-        with self.assertRaises(TypeError):
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "missing 1 required positional argument: 'typename'"
+        ):
             NamedTuple(typename='Emp', name=str, id=int)
 
     def test_copy_and_pickle(self):
@@ -7336,6 +7582,83 @@ class NamedTupleTests(BaseTestCase):
 
         self.assertEqual(CallNamedTuple.__orig_bases__, (NamedTuple,))
 
+    def test_setname_called_on_values_in_class_dictionary(self):
+        class Vanilla:
+            def __set_name__(self, owner, name):
+                self.name = name
+
+        class Foo(NamedTuple):
+            attr = Vanilla()
+
+        foo = Foo()
+        self.assertEqual(len(foo), 0)
+        self.assertNotIn('attr', Foo._fields)
+        self.assertIsInstance(foo.attr, Vanilla)
+        self.assertEqual(foo.attr.name, "attr")
+
+        class Bar(NamedTuple):
+            attr: Vanilla = Vanilla()
+
+        bar = Bar()
+        self.assertEqual(len(bar), 1)
+        self.assertIn('attr', Bar._fields)
+        self.assertIsInstance(bar.attr, Vanilla)
+        self.assertEqual(bar.attr.name, "attr")
+
+    def test_setname_raises_the_same_as_on_other_classes(self):
+        class CustomException(BaseException): pass
+
+        class Annoying:
+            def __set_name__(self, owner, name):
+                raise CustomException
+
+        annoying = Annoying()
+
+        with self.assertRaises(CustomException) as cm:
+            class NormalClass:
+                attr = annoying
+        normal_exception = cm.exception
+
+        with self.assertRaises(CustomException) as cm:
+            class NamedTupleClass(NamedTuple):
+                attr = annoying
+        namedtuple_exception = cm.exception
+
+        self.assertIs(type(namedtuple_exception), CustomException)
+        self.assertIs(type(namedtuple_exception), type(normal_exception))
+
+        self.assertEqual(len(namedtuple_exception.__notes__), 1)
+        self.assertEqual(
+            len(namedtuple_exception.__notes__), len(normal_exception.__notes__)
+        )
+
+        expected_note = (
+            "Error calling __set_name__ on 'Annoying' instance "
+            "'attr' in 'NamedTupleClass'"
+        )
+        self.assertEqual(namedtuple_exception.__notes__[0], expected_note)
+        self.assertEqual(
+            namedtuple_exception.__notes__[0],
+            normal_exception.__notes__[0].replace("NormalClass", "NamedTupleClass")
+        )
+
+    def test_strange_errors_when_accessing_set_name_itself(self):
+        class CustomException(Exception): pass
+
+        class Meta(type):
+            def __getattribute__(self, attr):
+                if attr == "__set_name__":
+                    raise CustomException
+                return object.__getattribute__(self, attr)
+
+        class VeryAnnoying(metaclass=Meta): pass
+
+        very_annoying = VeryAnnoying()
+
+        with self.assertRaises(CustomException):
+            class Foo(NamedTuple):
+                attr = very_annoying
+
 
 class TypedDictTests(BaseTestCase):
     def test_basics_functional_syntax(self):
@@ -7357,35 +7680,6 @@ class TypedDictTests(BaseTestCase):
         self.assertEqual(Emp.__optional_keys__, set())
         self.assertIsInstance(Emp.__optional_keys__, frozenset)
 
-    def test_basics_keywords_syntax(self):
-        with self.assertWarns(DeprecationWarning):
-            Emp = TypedDict('Emp', name=str, id=int)
-        self.assertIsSubclass(Emp, dict)
-        self.assertIsSubclass(Emp, typing.MutableMapping)
-        self.assertNotIsSubclass(Emp, collections.abc.Sequence)
-        jim = Emp(name='Jim', id=1)
-        self.assertIs(type(jim), dict)
-        self.assertEqual(jim['name'], 'Jim')
-        self.assertEqual(jim['id'], 1)
-        self.assertEqual(Emp.__name__, 'Emp')
-        self.assertEqual(Emp.__module__, __name__)
-        self.assertEqual(Emp.__bases__, (dict,))
-        self.assertEqual(Emp.__annotations__, {'name': str, 'id': int})
-        self.assertEqual(Emp.__total__, True)
-
-    def test_typeddict_special_keyword_names(self):
-        with self.assertWarns(DeprecationWarning):
-            TD = TypedDict("TD", cls=type, self=object, typename=str, _typename=int, fields=list, _fields=dict)
-        self.assertEqual(TD.__name__, 'TD')
-        self.assertEqual(TD.__annotations__, {'cls': type, 'self': object, 'typename': str, '_typename': int, 'fields': list, '_fields': dict})
-        a = TD(cls=str, self=42, typename='foo', _typename=53, fields=[('bar', tuple)], _fields={'baz', set})
-        self.assertEqual(a['cls'], str)
-        self.assertEqual(a['self'], 42)
-        self.assertEqual(a['typename'], 'foo')
-        self.assertEqual(a['_typename'], 53)
-        self.assertEqual(a['fields'], [('bar', tuple)])
-        self.assertEqual(a['_fields'], {'baz', set})
-
     def test_typeddict_create_errors(self):
         with self.assertRaises(TypeError):
             TypedDict.__new__()
@@ -7394,7 +7688,9 @@ class TypedDictTests(BaseTestCase):
         with self.assertRaises(TypeError):
             TypedDict('Emp', [('name', str)], None)
         with self.assertRaises(TypeError):
-            TypedDict(_typename='Emp', name=str, id=int)
+            TypedDict(_typename='Emp')
+        with self.assertRaises(TypeError):
+            TypedDict('Emp', name=str, id=int)
 
     def test_typeddict_errors(self):
         Emp = TypedDict('Emp', {'name': str, 'id': int})
@@ -7467,6 +7763,17 @@ class TypedDictTests(BaseTestCase):
         self.assertEqual(Options.__total__, False)
         self.assertEqual(Options.__required_keys__, frozenset())
         self.assertEqual(Options.__optional_keys__, {'log_level', 'log_path'})
+
+    def test_total_inherits_non_total(self):
+        class TD1(TypedDict, total=False):
+            a: int
+
+        self.assertIs(TD1.__total__, False)
+
+        class TD2(TD1):
+            b: str
+
+        self.assertIs(TD2.__total__, True)
 
     def test_optional_keys(self):
         class Point2Dor3D(Point2D, total=False):
@@ -7891,6 +8198,40 @@ class TypedDictTests(BaseTestCase):
         self.assertEqual(MultipleGenericBases.__orig_bases__, (GenericParent[int], GenericParent[float]))
         self.assertEqual(CallTypedDict.__orig_bases__, (TypedDict,))
 
+    def test_zero_fields_typeddicts(self):
+        T1 = TypedDict("T1", {})
+        class T2(TypedDict): pass
+        class T3[tvar](TypedDict): pass
+        S = TypeVar("S")
+        class T4(TypedDict, Generic[S]): pass
+
+        expected_warning = re.escape(
+            "Failing to pass a value for the 'fields' parameter is deprecated "
+            "and will be disallowed in Python 3.15. "
+            "To create a TypedDict class with 0 fields "
+            "using the functional syntax, "
+            "pass an empty dictionary, e.g. `T5 = TypedDict('T5', {})`."
+        )
+        with self.assertWarnsRegex(DeprecationWarning, fr"^{expected_warning}$"):
+            T5 = TypedDict('T5')
+
+        expected_warning = re.escape(
+            "Passing `None` as the 'fields' parameter is deprecated "
+            "and will be disallowed in Python 3.15. "
+            "To create a TypedDict class with 0 fields "
+            "using the functional syntax, "
+            "pass an empty dictionary, e.g. `T6 = TypedDict('T6', {})`."
+        )
+        with self.assertWarnsRegex(DeprecationWarning, fr"^{expected_warning}$"):
+            T6 = TypedDict('T6', None)
+
+        for klass in T1, T2, T3, T4, T5, T6:
+            with self.subTest(klass=klass.__name__):
+                self.assertEqual(klass.__annotations__, {})
+                self.assertEqual(klass.__required_keys__, set())
+                self.assertEqual(klass.__optional_keys__, set())
+                self.assertIsInstance(klass(), dict)
+
 
 class RequiredTests(BaseTestCase):
 
@@ -8014,17 +8355,6 @@ class IOTests(BaseTestCase):
         a = stuff.__annotations__['a']
         self.assertEqual(a.__parameters__, ())
 
-    def test_io_submodule(self):
-        with warnings.catch_warnings(record=True) as w:
-            warnings.filterwarnings("default", category=DeprecationWarning)
-            from typing.io import IO, TextIO, BinaryIO, __all__, __name__
-            self.assertIs(IO, typing.IO)
-            self.assertIs(TextIO, typing.TextIO)
-            self.assertIs(BinaryIO, typing.BinaryIO)
-            self.assertEqual(set(__all__), set(['IO', 'TextIO', 'BinaryIO']))
-            self.assertEqual(__name__, 'typing.io')
-            self.assertEqual(len(w), 1)
-
 
 class RETests(BaseTestCase):
     # Much of this is really testing _TypeAlias.
@@ -8069,16 +8399,6 @@ class RETests(BaseTestCase):
         self.assertEqual(repr(Match[str]), 'typing.Match[str]')
         self.assertEqual(repr(Match[bytes]), 'typing.Match[bytes]')
 
-    def test_re_submodule(self):
-        with warnings.catch_warnings(record=True) as w:
-            warnings.filterwarnings("default", category=DeprecationWarning)
-            from typing.re import Match, Pattern, __all__, __name__
-            self.assertIs(Match, typing.Match)
-            self.assertIs(Pattern, typing.Pattern)
-            self.assertEqual(set(__all__), set(['Match', 'Pattern']))
-            self.assertEqual(__name__, 'typing.re')
-            self.assertEqual(len(w), 1)
-
     def test_cannot_subclass(self):
         with self.assertRaisesRegex(
             TypeError,
@@ -8098,8 +8418,7 @@ class AnnotatedTests(BaseTestCase):
 
     def test_new(self):
         with self.assertRaisesRegex(
-            TypeError,
-            'Type Annotated cannot be instantiated',
+            TypeError, 'Cannot instantiate typing.Annotated',
         ):
             Annotated()
 
@@ -9293,7 +9612,7 @@ class AllTests(BaseTestCase):
         # Context managers.
         self.assertIn('ContextManager', a)
         self.assertIn('AsyncContextManager', a)
-        # Check that io and re are not exported.
+        # Check that former namespaces io and re are not exported.
         self.assertNotIn('io', a)
         self.assertNotIn('re', a)
         # Spot-check that stdlib modules aren't exported.
@@ -9306,6 +9625,10 @@ class AllTests(BaseTestCase):
         self.assertIn('SupportsComplex', a)
 
     def test_all_exported_names(self):
+        # ensure all dynamically created objects are actualised
+        for name in typing.__all__:
+            getattr(typing, name)
+
         actual_all = set(typing.__all__)
         computed_all = {
             k for k, v in vars(typing).items()
@@ -9313,7 +9636,6 @@ class AllTests(BaseTestCase):
             if k in actual_all or (
                 # avoid private names
                 not k.startswith('_') and
-                k not in {'io', 're'} and
                 # there's a few types and metaclasses that aren't exported
                 not k.endswith(('Meta', '_contra', '_co')) and
                 not k.upper() == k and

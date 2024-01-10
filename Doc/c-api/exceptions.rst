@@ -99,12 +99,25 @@ Printing and clearing
       Use :func:`sys.unraisablehook`.
 
 
+.. c:function:: void PyErr_FormatUnraisable(const char *format, ...)
+
+   Similar to :c:func:`PyErr_WriteUnraisable`, but the *format* and subsequent
+   parameters help format the warning message; they have the same meaning and
+   values as in :c:func:`PyUnicode_FromFormat`.
+   ``PyErr_WriteUnraisable(obj)`` is roughtly equivalent to
+   ``PyErr_FormatUnraisable("Exception ignored in: %R, obj)``.
+   If *format* is ``NULL``, only the traceback is printed.
+
+   .. versionadded:: 3.13
+
+
 .. c:function:: void PyErr_DisplayException(PyObject *exc)
 
    Print the standard traceback display of ``exc`` to ``sys.stderr``, including
    chained exceptions and notes.
 
    .. versionadded:: 3.12
+
 
 Raising exceptions
 ==================
@@ -427,7 +440,7 @@ Querying the error indicator
 .. c:function:: PyObject *PyErr_GetRaisedException(void)
 
    Return the exception currently being raised, clearing the error indicator at
-   the same time.
+   the same time. Return ``NULL`` if the error indicator is not set.
 
    This function is used by code that needs to catch exceptions,
    or code that needs to save and restore the error indicator temporarily.
@@ -528,7 +541,8 @@ Querying the error indicator
 
    .. note::
 
-      This function *does not* implicitly set the ``__traceback__``
+      This function *does not* implicitly set the
+      :attr:`~BaseException.__traceback__`
       attribute on the exception value. If setting the traceback
       appropriately is desired, the following additional snippet is needed::
 
@@ -740,7 +754,8 @@ Exception Objects
 .. c:function:: PyObject* PyException_GetTraceback(PyObject *ex)
 
    Return the traceback associated with the exception as a new reference, as
-   accessible from Python through :attr:`__traceback__`.  If there is no
+   accessible from Python through the :attr:`~BaseException.__traceback__`
+   attribute. If there is no
    traceback associated, this returns ``NULL``.
 
 
@@ -754,8 +769,8 @@ Exception Objects
 
    Return the context (another exception instance during whose handling *ex* was
    raised) associated with the exception as a new reference, as accessible from
-   Python through :attr:`__context__`.  If there is no context associated, this
-   returns ``NULL``.
+   Python through the :attr:`~BaseException.__context__` attribute.
+   If there is no context associated, this returns ``NULL``.
 
 
 .. c:function:: void PyException_SetContext(PyObject *ex, PyObject *ctx)
@@ -769,7 +784,8 @@ Exception Objects
 
    Return the cause (either an exception instance, or ``None``,
    set by ``raise ... from ...``) associated with the exception as a new
-   reference, as accessible from Python through :attr:`__cause__`.
+   reference, as accessible from Python through the
+   :attr:`~BaseException.__cause__` attribute.
 
 
 .. c:function:: void PyException_SetCause(PyObject *ex, PyObject *cause)
@@ -778,7 +794,8 @@ Exception Objects
    it.  There is no type check to make sure that *cause* is either an exception
    instance or ``None``.  This steals a reference to *cause*.
 
-   :attr:`__suppress_context__` is implicitly set to ``True`` by this function.
+   The :attr:`~BaseException.__suppress_context__` attribute is implicitly set
+   to ``True`` by this function.
 
 
 .. c:function:: PyObject* PyException_GetArgs(PyObject *ex)

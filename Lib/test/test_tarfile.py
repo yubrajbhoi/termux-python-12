@@ -43,7 +43,7 @@ def sha256sum(data):
 
 TEMPDIR = os.path.abspath(os_helper.TESTFN) + "-tardir"
 tarextdir = TEMPDIR + '-extract-test'
-tarname = support.findfile("testtar.tar")
+tarname = support.findfile("testtar.tar", subdir="archivetestdata")
 gzipname = os.path.join(TEMPDIR, "testtar.tar.gz")
 bz2name = os.path.join(TEMPDIR, "testtar.tar.bz2")
 xzname = os.path.join(TEMPDIR, "testtar.tar.xz")
@@ -101,6 +101,14 @@ class ReadTest(TarTest):
     def tearDown(self):
         self.tar.close()
 
+class StreamModeTest(ReadTest):
+
+    # Only needs to change how the tarfile is opened to set
+    # stream mode
+    def setUp(self):
+        self.tar = tarfile.open(self.tarname, mode=self.mode,
+                                encoding="iso8859-1",
+                                stream=True)
 
 class UstarReadTest(ReadTest, unittest.TestCase):
 
@@ -315,11 +323,23 @@ class ListTest(ReadTest, unittest.TestCase):
         # accessories if verbose flag is being used
         # ...
         # ?rw-r--r-- tarfile/tarfile     7011 2003-01-06 07:19:43 ustar/conttype
-        # ?rw-r--r-- tarfile/tarfile     7011 2003-01-06 07:19:43 ustar/regtype
+        # -rw-r--r-- tarfile/tarfile     7011 2003-01-06 07:19:43 ustar/regtype
+        # drwxr-xr-x tarfile/tarfile        0 2003-01-05 15:19:43 ustar/dirtype/
         # ...
-        self.assertRegex(out, (br'\?rw-r--r-- tarfile/tarfile\s+7011 '
-                               br'\d{4}-\d\d-\d\d\s+\d\d:\d\d:\d\d '
-                               br'ustar/\w+type ?\r?\n') * 2)
+        #
+        # Array of values to modify the regex below:
+        #  ((file_type, file_permissions, file_length), ...)
+        type_perm_lengths = (
+            (br'\?', b'rw-r--r--', b'7011'), (b'-', b'rw-r--r--', b'7011'),
+            (b'd', b'rwxr-xr-x', b'0'), (b'd', b'rwxr-xr-x', b'255'),
+            (br'\?', b'rw-r--r--', b'0'), (b'l', b'rwxrwxrwx', b'0'),
+            (b'b', b'rw-rw----', b'3,0'), (b'c', b'rw-rw-rw-', b'1,3'),
+            (b'p', b'rw-r--r--', b'0'))
+        self.assertRegex(out, b''.join(
+            [(tp + (br'%s tarfile/tarfile\s+%s ' % (perm, ln) +
+                    br'\d{4}-\d\d-\d\d\s+\d\d:\d\d:\d\d '
+                    br'ustar/\w+type[/>\sa-z-]*\n')) for tp, perm, ln
+             in type_perm_lengths]))
         # Make sure it prints the source of link with verbose flag
         self.assertIn(b'ustar/symtype -> regtype', out)
         self.assertIn(b'./ustar/linktest2/symtype -> ../linktest1/regtype', out)
@@ -483,7 +503,7 @@ class CommonReadTest(ReadTest):
         # bpo-39017 (CVE-2019-20907): reading a zero-length header should fail
         # with an exception
         with self.assertRaisesRegex(tarfile.ReadError, "file could not be opened successfully"):
-            with tarfile.open(support.findfile('recursion.tar')) as tar:
+            with tarfile.open(support.findfile('recursion.tar', subdir='archivetestdata')):
                 pass
 
     def test_extractfile_name(self):
@@ -853,6 +873,21 @@ class Bz2StreamReadTest(Bz2Test, StreamReadTest):
 class LzmaStreamReadTest(LzmaTest, StreamReadTest):
     pass
 
+class TarStreamModeReadTest(StreamModeTest, unittest.TestCase):
+
+    def test_stream_mode_no_cache(self):
+        for _ in self.tar:
+            pass
+        self.assertEqual(self.tar.members, [])
+
+class GzipStreamModeReadTest(GzipTest, TarStreamModeReadTest):
+    pass
+
+class Bz2StreamModeReadTest(Bz2Test, TarStreamModeReadTest):
+    pass
+
+class LzmaStreamModeReadTest(LzmaTest, TarStreamModeReadTest):
+    pass
 
 class DetectReadTest(TarTest, unittest.TestCase):
     def _testfunc_file(self, name, mode):
@@ -2542,7 +2577,7 @@ class MiscTest(unittest.TestCase):
         support.check__all__(self, tarfile, not_exported=not_exported)
 
     def test_useful_error_message_when_modules_missing(self):
-        fname = os.path.join(os.path.dirname(__file__), 'testtar.tar.xz')
+        fname = os.path.join(os.path.dirname(__file__), 'archivetestdata', 'testtar.tar.xz')
         with self.assertRaises(tarfile.ReadError) as excinfo:
             error = tarfile.CompressionError('lzma module is not available'),
             with unittest.mock.patch.object(tarfile.TarFile, 'xzopen', side_effect=error):
@@ -2607,7 +2642,7 @@ class CommandLineTest(unittest.TestCase):
                 self.assertIn(b'is a tar archive.\n', out)
 
     def test_test_command_invalid_file(self):
-        zipname = support.findfile('zipdir.zip')
+        zipname = support.findfile('zipdir.zip', subdir='archivetestdata')
         rc, out, err = self.tarfilecmd_failure('-t', zipname)
         self.assertIn(b' is not a tar archive.', err)
         self.assertEqual(out, b'')
@@ -2649,7 +2684,7 @@ class CommandLineTest(unittest.TestCase):
                 self.assertEqual(out, expected)
 
     def test_list_command_invalid_file(self):
-        zipname = support.findfile('zipdir.zip')
+        zipname = support.findfile('zipdir.zip', subdir='archivetestdata')
         rc, out, err = self.tarfilecmd_failure('-l', zipname)
         self.assertIn(b' is not a tar archive.', err)
         self.assertEqual(out, b'')
@@ -2774,7 +2809,7 @@ class CommandLineTest(unittest.TestCase):
             os_helper.rmtree(tarextdir)
 
     def test_extract_command_invalid_file(self):
-        zipname = support.findfile('zipdir.zip')
+        zipname = support.findfile('zipdir.zip', subdir='archivetestdata')
         with os_helper.temp_cwd(tarextdir):
             rc, out, err = self.tarfilecmd_failure('-e', zipname)
         self.assertIn(b' is not a tar archive.', err)
@@ -3429,7 +3464,7 @@ class TestExtractionFilters(unittest.TestCase):
         path = pathlib.Path(os.path.normpath(self.destdir / name))
         self.assertIn(path, self.expected_paths)
         self.expected_paths.remove(path)
-        if mode is not None and os_helper.can_chmod():
+        if mode is not None and os_helper.can_chmod() and os.name != 'nt':
             got = stat.filemode(stat.S_IMODE(path.stat().st_mode))
             self.assertEqual(got, mode)
         if type is None and isinstance(name, str) and name.endswith('/'):
@@ -3793,16 +3828,19 @@ class TestExtractionFilters(unittest.TestCase):
             arc.add('read_group_only', mode='?---r-----')
             arc.add('no_bits', mode='?---------')
             arc.add('dir/', mode='?---rwsrwt')
+            arc.add('dir_all_bits/', mode='?rwsrwsrwt')
 
-        # On some systems, setting the sticky bit is a no-op.
-        # Check if that's the case.
+        # On some systems, setting the uid, gid, and/or sticky bit is a no-ops.
+        # Check which bits we can set, so we can compare tarfile machinery to
+        # a simple chmod.
         tmp_filename = os.path.join(TEMPDIR, "tmp.file")
         with open(tmp_filename, 'w'):
             pass
         try:
+            new_mode = (os.stat(tmp_filename).st_mode
+                        | stat.S_ISVTX | stat.S_ISGID | stat.S_ISUID)
             try:
-                os.chmod(tmp_filename,
-                         os.stat(tmp_filename).st_mode | stat.S_ISVTX)
+                os.chmod(tmp_filename, new_mode)
             except OSError as exc:
                 if exc.errno == getattr(errno, "EFTYPE", 0):
                     # gh-108948: On FreeBSD, regular users cannot set
@@ -3811,28 +3849,34 @@ class TestExtractionFilters(unittest.TestCase):
                                   "regular users cannot set sticky bit")
                 else:
                     raise
-            have_sticky_files = (os.stat(tmp_filename).st_mode & stat.S_ISVTX)
+
+            got_mode = os.stat(tmp_filename).st_mode
+            _t_file = 't' if (got_mode & stat.S_ISVTX) else 'x'
+            _suid_file = 's' if (got_mode & stat.S_ISUID) else 'x'
+            _sgid_file = 's' if (got_mode & stat.S_ISGID) else 'x'
         finally:
             os.unlink(tmp_filename)
 
         os.mkdir(tmp_filename)
-        os.chmod(tmp_filename, os.stat(tmp_filename).st_mode | stat.S_ISVTX)
-        have_sticky_dirs = (os.stat(tmp_filename).st_mode & stat.S_ISVTX)
+        new_mode = (os.stat(tmp_filename).st_mode
+                    | stat.S_ISVTX | stat.S_ISGID | stat.S_ISUID)
+        os.chmod(tmp_filename, new_mode)
+        got_mode = os.stat(tmp_filename).st_mode
+        _t_dir = 't' if (got_mode & stat.S_ISVTX) else 'x'
+        _suid_dir = 's' if (got_mode & stat.S_ISUID) else 'x'
+        _sgid_dir = 's' if (got_mode & stat.S_ISGID) else 'x'
         os.rmdir(tmp_filename)
 
         with self.check_context(arc.open(), 'fully_trusted'):
-            if have_sticky_files:
-                self.expect_file('all_bits', mode='?rwsrwsrwt')
-            else:
-                self.expect_file('all_bits', mode='?rwsrwsrwx')
+            self.expect_file('all_bits',
+                             mode=f'?rw{_suid_file}rw{_sgid_file}rw{_t_file}')
             self.expect_file('perm_bits', mode='?rwxrwxrwx')
             self.expect_file('exec_group_other', mode='?rw-rwxrwx')
             self.expect_file('read_group_only', mode='?---r-----')
             self.expect_file('no_bits', mode='?---------')
-            if have_sticky_dirs:
-                self.expect_file('dir/', mode='?---rwsrwt')
-            else:
-                self.expect_file('dir/', mode='?---rwsrwx')
+            self.expect_file('dir/', mode=f'?---rw{_sgid_dir}rw{_t_dir}')
+            self.expect_file('dir_all_bits/',
+                             mode=f'?rw{_suid_dir}rw{_sgid_dir}rw{_t_dir}')
 
         with self.check_context(arc.open(), 'tar'):
             self.expect_file('all_bits', mode='?rwxr-xr-x')
@@ -3841,6 +3885,7 @@ class TestExtractionFilters(unittest.TestCase):
             self.expect_file('read_group_only', mode='?---r-----')
             self.expect_file('no_bits', mode='?---------')
             self.expect_file('dir/', mode='?---r-xr-x')
+            self.expect_file('dir_all_bits/', mode='?rwxr-xr-x')
 
         with self.check_context(arc.open(), 'data'):
             normal_dir_mode = stat.filemode(stat.S_IMODE(
@@ -3851,6 +3896,7 @@ class TestExtractionFilters(unittest.TestCase):
             self.expect_file('read_group_only', mode='?rw-r-----')
             self.expect_file('no_bits', mode='?rw-------')
             self.expect_file('dir/', mode=normal_dir_mode)
+            self.expect_file('dir_all_bits/', mode=normal_dir_mode)
 
     def test_pipe(self):
         # Test handling of a special file

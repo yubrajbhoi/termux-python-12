@@ -15,6 +15,7 @@ class CAPITest(unittest.TestCase):
     # TODO: Test the following functions:
     #
     #   PySys_Audit()
+    #   PySys_AuditTuple()
 
     maxDiff = None
 
@@ -29,7 +30,11 @@ class CAPITest(unittest.TestCase):
             self.assertEqual(getobject('\U0001f40d'.encode()), 42)
 
         self.assertIs(getobject(b'nonexisting'), AttributeError)
-        self.assertIs(getobject(b'\xff'), AttributeError)
+        with support.catch_unraisable_exception() as cm:
+            self.assertIs(getobject(b'\xff'), AttributeError)
+            self.assertEqual(cm.unraisable.exc_type, UnicodeDecodeError)
+            self.assertRegex(str(cm.unraisable.exc_value),
+                             "'utf-8' codec can't decode")
         # CRASHES getobject(NULL)
 
     @support.cpython_only

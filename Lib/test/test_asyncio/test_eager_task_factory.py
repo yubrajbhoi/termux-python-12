@@ -2,16 +2,11 @@
 
 import asyncio
 import contextvars
-import gc
-import time
 import unittest
 
-from types import GenericAlias
 from unittest import mock
-from asyncio import base_events
 from asyncio import tasks
 from test.test_asyncio import utils as test_utils
-from test.test_asyncio.test_tasks import get_innermost_context
 from test.support.script_helper import assert_python_ok
 
 MOCK_ANY = mock.ANY

@@ -72,22 +72,12 @@ def _maybe_compile(compiler, source, filename, symbol):
 
     return compiler(source, filename, symbol, incomplete_input=False)
 
-def _is_syntax_error(err1, err2):
-    rep1 = repr(err1)
-    rep2 = repr(err2)
-    if "was never closed" in rep1 and "was never closed" in rep2:
-        return False
-    if rep1 == rep2:
-        return True
-    return False
-
 def _compile(source, filename, symbol, incomplete_input=True):
     flags = 0
     if incomplete_input:
         flags |= PyCF_ALLOW_INCOMPLETE_INPUT
         flags |= PyCF_DONT_IMPLY_DEDENT
     return compile(source, filename, symbol, flags)
-
 
 def compile_command(source, filename="<input>", symbol="single"):
     r"""Compile a command and determine whether it is incomplete.

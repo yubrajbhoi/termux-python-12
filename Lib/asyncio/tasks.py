@@ -15,8 +15,8 @@ import contextvars
 import functools
 import inspect
 import itertools
+import math
 import types
-import warnings
 import weakref
 from types import GenericAlias
 
@@ -65,19 +65,6 @@ def all_tasks(loop=None):
             break
     return {t for t in itertools.chain(scheduled_tasks, eager_tasks)
             if futures._get_loop(t) is loop and not t.done()}
-
-
-def _set_task_name(task, name):
-    if name is not None:
-        try:
-            set_name = task.set_name
-        except AttributeError:
-            warnings.warn("Task.set_name() was added in Python 3.8, "
-                      "the method support will be mandatory for third-party "
-                      "task implementations since 3.13.",
-                      DeprecationWarning, stacklevel=3)
-        else:
-            set_name(name)
 
 
 class Task(futures._PyFuture):  # Inherit Python Task implementation
@@ -417,11 +404,10 @@ def create_task(coro, *, name=None, context=None):
     loop = events.get_running_loop()
     if context is None:
         # Use legacy API if context is not needed
-        task = loop.create_task(coro)
+        task = loop.create_task(coro, name=name)
     else:
-        task = loop.create_task(coro, context=context)
+        task = loop.create_task(coro, name=name, context=context)
 
-    _set_task_name(task, name)
     return task
 
 
@@ -436,8 +422,6 @@ async def wait(fs, *, timeout=None, return_when=ALL_COMPLETED):
     """Wait for the Futures or Tasks given by fs to complete.
 
     The fs iterable must not be empty.
-
-    Coroutines will be wrapped in Tasks.
 
     Returns two sets of Future: (done, pending).
 
@@ -655,6 +639,9 @@ async def sleep(delay, result=None):
     if delay <= 0:
         await __sleep0()
         return result
+
+    if math.isnan(delay):
+        raise ValueError("Invalid delay: NaN (not a number)")
 
     loop = events.get_running_loop()
     future = loop.create_future()

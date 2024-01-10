@@ -22,6 +22,8 @@ always available.
 
    .. versionadded:: 3.2
 
+   .. availability:: Unix.
+
 
 .. function:: addaudithook(hook)
 
@@ -829,7 +831,7 @@ always available.
 
    Note that the returned value may not actually reflect how many
    references to the object are actually held.  For example, some
-   objects are "immortal" and have a very high refcount that does not
+   objects are :term:`immortal` and have a very high refcount that does not
    reflect the actual number of references.  Consequently, do not rely
    on the returned value to be accurate, other than a value of 0 or 1.
 
@@ -1180,14 +1182,14 @@ always available.
    names used in Python programs are automatically interned, and the dictionaries
    used to hold module, class or instance attributes have interned keys.
 
-   Interned strings are not immortal; you must keep a reference to the return
-   value of :func:`intern` around to benefit from it.
+   Interned strings are not :term:`immortal`; you must keep a reference to the
+   return value of :func:`intern` around to benefit from it.
 
 
 .. function:: is_finalizing()
 
-   Return :const:`True` if the Python interpreter is
-   :term:`shutting down <interpreter shutdown>`, :const:`False` otherwise.
+   Return :const:`True` if the main Python interpreter is
+   :term:`shutting down <interpreter shutdown>`. Return :const:`False` otherwise.
 
    .. versionadded:: 3.5
 
@@ -1202,6 +1204,18 @@ always available.
    module for more information.)
 
    .. versionadded:: 3.12
+
+.. function:: _is_interned(string)
+
+   Return :const:`True` if the given string is "interned", :const:`False`
+   otherwise.
+
+   .. versionadded:: 3.13
+
+   .. impl-detail::
+
+      It is not guaranteed to exist in all implementations of Python.
+
 
 .. data:: last_type
           last_value
@@ -1730,8 +1744,16 @@ always available.
 
    .. availability:: Windows.
 
+   .. note::
+      Changing the filesystem encoding after Python startup is risky because
+      the old fsencoding or paths encoded by the old fsencoding may be cached
+      somewhere. Use :envvar:`PYTHONLEGACYWINDOWSFSENCODING` instead.
+
    .. versionadded:: 3.6
       See :pep:`529` for more details.
+
+   .. deprecated-removed:: 3.13 3.16
+      Use :envvar:`PYTHONLEGACYWINDOWSFSENCODING` instead.
 
 .. data:: stdin
           stdout

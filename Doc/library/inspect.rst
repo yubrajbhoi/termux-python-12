@@ -492,7 +492,7 @@ attributes (see :ref:`import-mod-attrs` for module attributes):
    Methods implemented via descriptors that also pass one of the other tests
    return ``False`` from the :func:`ismethoddescriptor` test, simply because the
    other tests promise more -- you can, e.g., count on having the
-   :ref:`__func__ <instance-methods>` attribute (etc) when an object passes
+   :attr:`~method.__func__` attribute (etc) when an object passes
    :func:`ismethod`.
 
 
@@ -709,8 +709,8 @@ function.
    The optional *return_annotation* argument can be an arbitrary Python object.
    It represents the "return" annotation of the callable.
 
-   :class:`!Signature` objects are *immutable*.  Use :meth:`Signature.replace` to make a
-   modified copy.
+   :class:`!Signature` objects are *immutable*.  Use :meth:`Signature.replace` or
+   :func:`copy.replace` to make a modified copy.
 
    .. versionchanged:: 3.5
       :class:`!Signature` objects are now picklable and :term:`hashable`.
@@ -768,6 +768,20 @@ function.
          >>> str(new_sig)
          "(a, b) -> 'new return anno'"
 
+      :class:`Signature` objects are also supported by the generic function
+      :func:`copy.replace`.
+
+   .. method:: format(*, max_width=None)
+
+      Create a string representation of the :class:`Signature` object.
+
+      If *max_width* is passed, the method will attempt to fit
+      the signature into lines of at most *max_width* characters.
+      If the signature is longer than *max_width*,
+      all parameters will be on separate lines.
+
+      .. versionadded:: 3.13
+
    .. classmethod:: Signature.from_callable(obj, *, follow_wrapped=True, globals=None, locals=None, eval_str=False)
 
        Return a :class:`Signature` (or its subclass) object for a given callable
@@ -794,7 +808,7 @@ function.
 
    :class:`!Parameter` objects are *immutable*.
    Instead of modifying a :class:`!Parameter` object,
-   you can use :meth:`Parameter.replace` to create a modified copy.
+   you can use :meth:`Parameter.replace` or :func:`copy.replace` to create a modified copy.
 
    .. versionchanged:: 3.5
       Parameter objects are now picklable and :term:`hashable`.
@@ -920,6 +934,9 @@ function.
 
          >>> str(param.replace(default=Parameter.empty, annotation='spam'))
          "foo: 'spam'"
+
+      :class:`Parameter` objects are also supported by the generic function
+      :func:`copy.replace`.
 
    .. versionchanged:: 3.4
       In Python 3.3 :class:`Parameter` objects were allowed to have ``name`` set
@@ -1208,9 +1225,10 @@ Classes and functions
    * If ``obj`` is a class, ``globals`` defaults to
      ``sys.modules[obj.__module__].__dict__`` and ``locals`` defaults
      to the ``obj`` class namespace.
-   * If ``obj`` is a callable, ``globals`` defaults to ``obj.__globals__``,
+   * If ``obj`` is a callable, ``globals`` defaults to
+     :attr:`obj.__globals__ <function.__globals__>`,
      although if ``obj`` is a wrapped function (using
-     ``functools.update_wrapper()``) it is first unwrapped.
+     :func:`functools.update_wrapper`) it is first unwrapped.
 
    Calling ``get_annotations`` is best practice for accessing the
    annotations dict of any object.  See :ref:`annotations-howto` for

@@ -93,8 +93,8 @@ in :mod:`logging` itself) and defining handlers which are declared either in
 
    :param fname: A filename, or a file-like object, or an instance derived
                  from :class:`~configparser.RawConfigParser`. If a
-                 ``RawConfigParser``-derived instance is passed, it is used as
-                 is. Otherwise, a :class:`~configparser.Configparser` is
+                 :class:`!RawConfigParser`-derived instance is passed, it is used as
+                 is. Otherwise, a :class:`~configparser.ConfigParser` is
                  instantiated, and the configuration read by it from the
                  object passed in ``fname``. If that has a :meth:`readline`
                  method, it is assumed to be a file-like object and read using
@@ -103,7 +103,7 @@ in :mod:`logging` itself) and defining handlers which are declared either in
                  :meth:`~configparser.ConfigParser.read`.
 
 
-   :param defaults: Defaults to be passed to the ConfigParser can be specified
+   :param defaults: Defaults to be passed to the :class:`!ConfigParser` can be specified
                     in this argument.
 
    :param disable_existing_loggers: If specified as ``False``, loggers which
@@ -685,7 +685,8 @@ resolve to ``'dev_team@domain.tld'`` and the string
 ``'support_team@domain.tld'``. The ``subject`` value could be accessed
 using either ``'cfg://handlers.email.subject'`` or, equivalently,
 ``'cfg://handlers.email[subject]'``.  The latter form only needs to be
-used if the key contains spaces or non-alphanumeric characters.  If an
+used if the key contains spaces or non-alphanumeric characters. Please note
+that the characters ``[`` and ``]`` are not allowed in the keys. If an
 index value consists only of decimal digits, access will be attempted
 using the corresponding integer value, falling back to the string
 value if needed.

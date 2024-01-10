@@ -22,15 +22,6 @@ Glossary
 
       * The :const:`Ellipsis` built-in constant.
 
-   2to3
-      A tool that tries to convert Python 2.x code to Python 3.x code by
-      handling most of the incompatibilities which can be detected by parsing the
-      source and traversing the parse tree.
-
-      2to3 is available in the standard library as :mod:`lib2to3`; a standalone
-      entry point is provided as :file:`Tools/scripts/2to3`.  See
-      :ref:`2to3-reference`.
-
    abstract base class
       Abstract base classes complement :term:`duck-typing` by
       providing a way to define interfaces when other techniques like
@@ -513,7 +504,7 @@ Glossary
       .. index:: single: generator expression
 
    generator expression
-      An expression that returns an iterator.  It looks like a normal expression
+      An :term:`expression` that returns an :term:`iterator`.  It looks like a normal expression
       followed by a :keyword:`!for` clause defining a loop variable, range,
       and an optional :keyword:`!if` clause.  The combined expression
       generates values for an enclosing function::
@@ -590,6 +581,16 @@ Glossary
       An Integrated Development and Learning Environment for Python.
       :ref:`idle` is a basic editor and interpreter environment
       which ships with the standard distribution of Python.
+
+   immortal
+      If an object is immortal, its reference count is never modified, and
+      therefore it is never deallocated.
+
+      Built-in strings and singletons are immortal objects. For example,
+      :const:`True` and :const:`None` singletons are immmortal.
+
+      See `PEP 683 – Immortal Objects, Using a Fixed Refcount
+      <https://peps.python.org/pep-0683/>`_ for more information.
 
    immutable
       An object with a fixed value.  Immutable objects include numbers, strings and
@@ -1070,7 +1071,7 @@ Glossary
    reference count
       The number of references to an object.  When the reference count of an
       object drops to zero, it is deallocated.  Some objects are
-      "immortal" and have reference counts that are never modified, and
+      :term:`immortal` and have reference counts that are never modified, and
       therefore the objects are never deallocated.  Reference counting is
       generally not visible to Python code, but it is a key element of the
       :term:`CPython` implementation.  Programmers can call the
@@ -1123,6 +1124,21 @@ Glossary
       created using the subscript notation, ``[]`` with colons between numbers
       when several are given, such as in ``variable_name[1:3:5]``.  The bracket
       (subscript) notation uses :class:`slice` objects internally.
+
+   soft deprecated
+      A soft deprecation can be used when using an API which should no longer
+      be used to write new code, but it remains safe to continue using it in
+      existing code. The API remains documented and tested, but will not be
+      developed further (no enhancement).
+
+      The main difference between a "soft" and a (regular) "hard" deprecation
+      is that the soft deprecation does not imply scheduling the removal of the
+      deprecated API.
+
+      Another difference is that a soft deprecation does not issue a warning.
+
+      See `PEP 387: Soft Deprecation
+      <https://peps.python.org/pep-0387/#soft-deprecation>`_.
 
    special method
       .. index:: pair: special; method

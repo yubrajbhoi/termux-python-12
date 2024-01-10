@@ -102,14 +102,13 @@ class SampleClass:
 
     a_class_attribute = 42
 
-    @classmethod
-    @property
-    def a_classmethod_property(cls):
+    @functools.cached_property
+    def a_cached_property(self):
         """
-        >>> print(SampleClass.a_classmethod_property)
-        42
+        >>> print(SampleClass(29).get())
+        29
         """
-        return cls.a_class_attribute
+        return "hello"
 
     class NestedClass:
         """
@@ -532,8 +531,8 @@ methods, classmethods, staticmethods, properties, and nested classes.
      3  SampleClass.NestedClass
      1  SampleClass.NestedClass.__init__
      1  SampleClass.__init__
+     1  SampleClass.a_cached_property
      2  SampleClass.a_classmethod
-     1  SampleClass.a_classmethod_property
      1  SampleClass.a_property
      1  SampleClass.a_staticmethod
      1  SampleClass.double
@@ -588,8 +587,8 @@ functions, classes, and the `__test__` dictionary, if it exists:
      3  some_module.SampleClass.NestedClass
      1  some_module.SampleClass.NestedClass.__init__
      1  some_module.SampleClass.__init__
+     1  some_module.SampleClass.a_cached_property
      2  some_module.SampleClass.a_classmethod
-     1  some_module.SampleClass.a_classmethod_property
      1  some_module.SampleClass.a_property
      1  some_module.SampleClass.a_staticmethod
      1  some_module.SampleClass.double
@@ -630,8 +629,8 @@ By default, an object with no doctests doesn't create any tests:
      3  SampleClass.NestedClass
      1  SampleClass.NestedClass.__init__
      1  SampleClass.__init__
+     1  SampleClass.a_cached_property
      2  SampleClass.a_classmethod
-     1  SampleClass.a_classmethod_property
      1  SampleClass.a_property
      1  SampleClass.a_staticmethod
      1  SampleClass.double
@@ -651,8 +650,8 @@ displays.
      0  SampleClass.NestedClass.get
      0  SampleClass.NestedClass.square
      1  SampleClass.__init__
+     1  SampleClass.a_cached_property
      2  SampleClass.a_classmethod
-     1  SampleClass.a_classmethod_property
      1  SampleClass.a_property
      1  SampleClass.a_staticmethod
      1  SampleClass.double
@@ -671,9 +670,11 @@ It used to be broken for quite some time until `bpo-28249`.
        30  test.doctest_lineno.ClassWithDoctest
      None  test.doctest_lineno.ClassWithoutDocstring
      None  test.doctest_lineno.MethodWrapper
+       53  test.doctest_lineno.MethodWrapper.classmethod_with_doctest
        39  test.doctest_lineno.MethodWrapper.method_with_docstring
        45  test.doctest_lineno.MethodWrapper.method_with_doctest
      None  test.doctest_lineno.MethodWrapper.method_without_docstring
+       61  test.doctest_lineno.MethodWrapper.property_with_doctest
         4  test.doctest_lineno.func_with_docstring
        12  test.doctest_lineno.func_with_doctest
      None  test.doctest_lineno.func_without_docstring
@@ -751,6 +752,38 @@ Note here that 'bin', 'oct', and 'hex' are functions; 'float.as_integer_ratio',
 'float.hex', and 'int.bit_length' are methods; 'float.fromhex' is a classmethod,
 and 'int' is a type.
 """
+
+
+class TestDocTest(unittest.TestCase):
+
+    def test_run(self):
+        test = '''
+            >>> 1 + 1
+            11
+            >>> 2 + 3      # doctest: +SKIP
+            "23"
+            >>> 5 + 7
+            57
+        '''
+
+        def myfunc():
+            pass
+        myfunc.__doc__ = test
+
+        # test DocTestFinder.run()
+        test = doctest.DocTestFinder().find(myfunc)[0]
+        with support.captured_stdout():
+            with support.captured_stderr():
+                results = doctest.DocTestRunner(verbose=False).run(test)
+
+        # test TestResults
+        self.assertIsInstance(results, doctest.TestResults)
+        self.assertEqual(results.failed, 2)
+        self.assertEqual(results.attempted, 3)
+        self.assertEqual(results.skipped, 1)
+        self.assertEqual(tuple(results), (2, 3))
+        x, y = results
+        self.assertEqual((x, y), (2, 3))
 
 
 class TestDocTestFinder(unittest.TestCase):
@@ -1302,14 +1335,14 @@ The NORMALIZE_WHITESPACE flag causes all sequences of whitespace to be
 treated as equal:
 
     >>> def f(x):
-    ...     '>>> print(1, 2, 3)\n  1   2\n 3'
+    ...     '\n>>> print(1, 2, 3)\n  1   2\n 3'
 
     >>> # Without the flag:
     >>> test = doctest.DocTestFinder().find(f)[0]
     >>> doctest.DocTestRunner(verbose=False).run(test)
     ... # doctest: +ELLIPSIS
     **********************************************************************
-    File ..., line 2, in f
+    File ..., line 3, in f
     Failed example:
         print(1, 2, 3)
     Expected:
@@ -2891,6 +2924,9 @@ Check doctest with a non-ascii filename:
         Traceback (most recent call last):
           File ...
             exec(compile(example.source, filename, "single",
+            ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                         compileflags, True), test.globs)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
           File "<doctest foo-bär@baz[0]>", line 1, in <module>
             raise Exception('clé')
         Exception: clé

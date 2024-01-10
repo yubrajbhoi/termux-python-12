@@ -2,18 +2,20 @@
 # compatible with C++ and does not emit C++ compiler warnings.
 import os.path
 import shutil
-import sys
 import unittest
 import subprocess
 import sysconfig
 from test import support
-from test.support import os_helper
 
 
 SOURCE = os.path.join(os.path.dirname(__file__), 'extension.cpp')
 SETUP = os.path.join(os.path.dirname(__file__), 'setup.py')
 
 
+# gh-110119: pip does not currently support 't' in the ABI flag use by
+# --disable-gil builds. Once it does, we can remove this skip.
+@unittest.skipIf(support.Py_GIL_DISABLED,
+                 'test does not work with --disable-gil')
 @support.requires_subprocess()
 class TestCPPExt(unittest.TestCase):
     @support.requires_resource('cpu')

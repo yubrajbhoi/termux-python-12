@@ -6,7 +6,7 @@ if __name__ != 'test.support':
 import contextlib
 import dataclasses
 import functools
-import opcode
+import _opcode
 import os
 import re
 import stat
@@ -56,8 +56,9 @@ __all__ = [
     "run_with_tz", "PGO", "missing_compiler_executable",
     "ALWAYS_EQ", "NEVER_EQ", "LARGEST", "SMALLEST",
     "LOOPBACK_TIMEOUT", "INTERNET_TIMEOUT", "SHORT_TIMEOUT", "LONG_TIMEOUT",
-    "Py_DEBUG", "EXCEEDS_RECURSION_LIMIT", "C_RECURSION_LIMIT",
+    "Py_DEBUG", "EXCEEDS_RECURSION_LIMIT", "Py_C_RECURSION_LIMIT",
     "skip_on_s390x",
+    "without_optimizer",
     ]
 
 
@@ -391,10 +392,10 @@ def skip_if_buildbot(reason=None):
         isbuildbot = False
     return unittest.skipIf(isbuildbot, reason)
 
-def check_sanitizer(*, address=False, memory=False, ub=False):
+def check_sanitizer(*, address=False, memory=False, ub=False, thread=False):
     """Returns True if Python is compiled with sanitizer support"""
-    if not (address or memory or ub):
-        raise ValueError('At least one of address, memory, or ub must be True')
+    if not (address or memory or ub or thread):
+        raise ValueError('At least one of address, memory, ub or thread must be True')
 
 
     cflags = sysconfig.get_config_var('CFLAGS') or ''
@@ -411,18 +412,23 @@ def check_sanitizer(*, address=False, memory=False, ub=False):
         '-fsanitize=undefined' in cflags or
         '--with-undefined-behavior-sanitizer' in config_args
     )
+    thread_sanitizer = (
+        '-fsanitize=thread' in cflags or
+        '--with-thread-sanitizer' in config_args
+    )
     return (
         (memory and memory_sanitizer) or
         (address and address_sanitizer) or
-        (ub and ub_sanitizer)
+        (ub and ub_sanitizer) or
+        (thread and thread_sanitizer)
     )
 
 
-def skip_if_sanitizer(reason=None, *, address=False, memory=False, ub=False):
+def skip_if_sanitizer(reason=None, *, address=False, memory=False, ub=False, thread=False):
     """Decorator raising SkipTest if running with a sanitizer active."""
     if not reason:
         reason = 'not working with sanitizers active'
-    skip = check_sanitizer(address=address, memory=memory, ub=ub)
+    skip = check_sanitizer(address=address, memory=memory, ub=ub, thread=thread)
     return unittest.skipIf(skip, reason)
 
 # gh-89363: True if fork() can hang if Python is built with Address Sanitizer
@@ -431,7 +437,7 @@ HAVE_ASAN_FORK_BUG = check_sanitizer(address=True)
 
 
 def set_sanitizer_env_var(env, option):
-    for name in ('ASAN_OPTIONS', 'MSAN_OPTIONS', 'UBSAN_OPTIONS'):
+    for name in ('ASAN_OPTIONS', 'MSAN_OPTIONS', 'UBSAN_OPTIONS', 'TSAN_OPTIONS'):
         if name in env:
             env[name] += f':{option}'
         else:
@@ -508,15 +514,6 @@ def has_no_debug_ranges():
 
 def requires_debug_ranges(reason='requires co_positions / debug_ranges'):
     return unittest.skipIf(has_no_debug_ranges(), reason)
-
-def requires_legacy_unicode_capi():
-    try:
-        from _testcapi import unicode_legacy_string
-    except ImportError:
-        unicode_legacy_string = None
-
-    return unittest.skipUnless(unicode_legacy_string,
-                               'requires legacy Unicode C API')
 
 MS_WINDOWS = (sys.platform == 'win32')
 
@@ -804,11 +801,12 @@ def check_cflags_pgo():
     return any(option in cflags_nodist for option in pgo_options)
 
 
-_header = 'nP'
+Py_GIL_DISABLED = bool(sysconfig.get_config_var('Py_GIL_DISABLED'))
+if Py_GIL_DISABLED:
+    _header = 'PHBBInP'
+else:
+    _header = 'nP'
 _align = '0n'
-if hasattr(sys, "getobjects"):
-    _header = '2P' + _header
-    _align = '0P'
 _vheader = _header + 'n'
 
 def calcobjsize(fmt):
@@ -1090,18 +1088,30 @@ def check_impl_detail(**guards):
 
 def no_tracing(func):
     """Decorator to temporarily turn off tracing for the duration of a test."""
-    if not hasattr(sys, 'gettrace'):
-        return func
-    else:
+    trace_wrapper = func
+    if hasattr(sys, 'gettrace'):
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
+        def trace_wrapper(*args, **kwargs):
             original_trace = sys.gettrace()
             try:
                 sys.settrace(None)
                 return func(*args, **kwargs)
             finally:
                 sys.settrace(original_trace)
-        return wrapper
+
+    coverage_wrapper = trace_wrapper
+    if 'test.cov' in sys.modules:  # -Xpresite=test.cov used
+        cov = sys.monitoring.COVERAGE_ID
+        @functools.wraps(func)
+        def coverage_wrapper(*args, **kwargs):
+            original_events = sys.monitoring.get_events(cov)
+            try:
+                sys.monitoring.set_events(cov, 0)
+                return trace_wrapper(*args, **kwargs)
+            finally:
+                sys.monitoring.set_events(cov, original_events)
+
+    return coverage_wrapper
 
 
 def refcount_test(test):
@@ -1120,12 +1130,11 @@ def requires_limited_api(test):
         import _testcapi
     except ImportError:
         return unittest.skip('needs _testcapi module')(test)
-    return unittest.skipUnless(
-        _testcapi.LIMITED_API_AVAILABLE, 'needs Limited API support')(test)
+    return test
 
 def requires_specialization(test):
     return unittest.skipUnless(
-        opcode.ENABLE_SPECIALIZATION, "requires specialization")(test)
+        _opcode.ENABLE_SPECIALIZATION, "requires specialization")(test)
 
 
 #=======================================================================
@@ -1680,11 +1689,11 @@ def run_in_subinterp_with_config(code, *, own_gil=None, **config):
     module is enabled.
     """
     _check_tracemalloc()
-    import _testcapi
+    import _testinternalcapi
     if own_gil is not None:
         assert 'gil' not in config, (own_gil, config)
         config['gil'] = 2 if own_gil else 1
-    return _testcapi.run_in_subinterp_with_config(code, **config)
+    return _testinternalcapi.run_in_subinterp_with_config(code, **config)
 
 
 def _check_tracemalloc():
@@ -1840,7 +1849,12 @@ class SaveSignals:
 
 def with_pymalloc():
     import _testcapi
-    return _testcapi.WITH_PYMALLOC
+    return _testcapi.WITH_PYMALLOC and not Py_GIL_DISABLED
+
+
+def with_mimalloc():
+    import _testcapi
+    return _testcapi.WITH_MIMALLOC
 
 
 class _ALWAYS_EQ:
@@ -2112,13 +2126,13 @@ def set_recursion_limit(limit):
     finally:
         sys.setrecursionlimit(original_limit)
 
-def infinite_recursion(max_depth=100):
-    """Set a lower limit for tests that interact with infinite recursions
-    (e.g test_ast.ASTHelpers_Test.test_recursion_direct) since on some
-    debug windows builds, due to not enough functions being inlined the
-    stack size might not handle the default recursion limit (1000). See
-    bpo-11105 for details."""
-    if max_depth < 3:
+def infinite_recursion(max_depth=None):
+    if max_depth is None:
+        # Pick a number large enough to cause problems
+        # but not take too long for code that can handle
+        # very deep recursion.
+        max_depth = 20_000
+    elif max_depth < 3:
         raise ValueError("max_depth must be at least 3, got {max_depth}")
     depth = get_recursion_depth()
     depth = max(depth - 1, 1)  # Ignore infinite_recursion() frame.
@@ -2356,15 +2370,43 @@ def adjust_int_max_str_digits(max_digits):
     finally:
         sys.set_int_max_str_digits(current)
 
-#For recursion tests, easily exceeds default recursion limit
-EXCEEDS_RECURSION_LIMIT = 5000
 
-# The default C recursion limit (from Include/cpython/pystate.h).
-C_RECURSION_LIMIT = 1500
+def _get_c_recursion_limit():
+    try:
+        import _testcapi
+        return _testcapi.Py_C_RECURSION_LIMIT
+    except (ImportError, AttributeError):
+        # Originally taken from Include/cpython/pystate.h .
+        return 8000
+
+# The default C recursion limit.
+Py_C_RECURSION_LIMIT = _get_c_recursion_limit()
+
+#For recursion tests, easily exceeds default recursion limit
+EXCEEDS_RECURSION_LIMIT = Py_C_RECURSION_LIMIT * 3
 
 #Windows doesn't have os.uname() but it doesn't support s390x.
 skip_on_s390x = unittest.skipIf(hasattr(os, 'uname') and os.uname().machine == 's390x',
                                 'skipped on s390x')
+
+Py_TRACE_REFS = hasattr(sys, 'getobjects')
+
+# Decorator to disable optimizer while a function run
+def without_optimizer(func):
+    try:
+        import _testinternalcapi
+    except ImportError:
+        return func
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        save_opt = _testinternalcapi.get_optimizer()
+        try:
+            _testinternalcapi.set_optimizer(None)
+            return func(*args, **kwargs)
+        finally:
+            _testinternalcapi.set_optimizer(save_opt)
+    return wrapper
+
 
 _BASE_COPY_SRC_DIR_IGNORED_NAMES = frozenset({
     # SRC_DIR/.git

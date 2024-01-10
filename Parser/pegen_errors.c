@@ -1,7 +1,9 @@
 #include <Python.h>
 #include <errcode.h>
 
-#include "tokenizer.h"
+#include "pycore_pyerrors.h"      // _PyErr_ProgramDecodedTextObject()
+#include "lexer/state.h"
+#include "lexer/lexer.h"
 #include "pegen.h"
 
 // TOKENIZER ERRORS
@@ -309,6 +311,10 @@ _PyPegen_raise_error_known_location(Parser *p, PyObject *errtype,
                                     Py_ssize_t end_lineno, Py_ssize_t end_col_offset,
                                     const char *errmsg, va_list va)
 {
+    // Bail out if we already have an error set.
+    if (p->error_indicator && PyErr_Occurred()) {
+        return NULL;
+    }
     PyObject *value = NULL;
     PyObject *errstr = NULL;
     PyObject *error_line = NULL;
@@ -400,7 +406,7 @@ error:
 
 void
 _Pypegen_set_syntax_error(Parser* p, Token* last_token) {
-    // Existing sintax error
+    // Existing syntax error
     if (PyErr_Occurred()) {
         // Prioritize tokenizer errors to custom syntax errors raised
         // on the second phase only if the errors come from the parser.

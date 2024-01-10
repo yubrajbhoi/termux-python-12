@@ -160,6 +160,29 @@ class LongTests(unittest.TestCase):
         # CRASHES fromunicodeobject(NULL, 0)
         # CRASHES fromunicodeobject(NULL, 16)
 
+    def test_long_asint(self):
+        # Test PyLong_AsInt()
+        PyLong_AsInt = _testcapi.PyLong_AsInt
+        from _testcapi import INT_MIN, INT_MAX
+
+        # round trip (object -> int -> object)
+        for value in (INT_MIN, INT_MAX, -1, 0, 1, 123):
+            with self.subTest(value=value):
+                self.assertEqual(PyLong_AsInt(value), value)
+        self.assertEqual(PyLong_AsInt(IntSubclass(42)), 42)
+        self.assertEqual(PyLong_AsInt(Index(42)), 42)
+        self.assertEqual(PyLong_AsInt(MyIndexAndInt()), 10)
+
+        # bound checking
+        self.assertRaises(OverflowError, PyLong_AsInt, INT_MIN - 1)
+        self.assertRaises(OverflowError, PyLong_AsInt, INT_MAX + 1)
+
+        # invalid type
+        self.assertRaises(TypeError, PyLong_AsInt, 1.0)
+        self.assertRaises(TypeError, PyLong_AsInt, b'2')
+        self.assertRaises(TypeError, PyLong_AsInt, '3')
+        self.assertRaises(SystemError, PyLong_AsInt, NULL)
+
     def test_long_aslong(self):
         # Test PyLong_AsLong() and PyLong_FromLong()
         aslong = _testcapi.pylong_aslong

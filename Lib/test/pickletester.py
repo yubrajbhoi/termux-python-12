@@ -1825,6 +1825,14 @@ class AbstractPickleTests:
             t2 = self.loads(p)
             self.assert_is_copy(t, t2)
 
+    def test_unicode_memoization(self):
+        # Repeated str is re-used (even when escapes added).
+        for proto in protocols:
+            for s in '', 'xyz', 'xyz\n', 'x\\yz', 'x\xa1yz\r':
+                p = self.dumps((s, s), proto)
+                s1, s2 = self.loads(p)
+                self.assertIs(s1, s2)
+
     def test_bytes(self):
         for proto in protocols:
             for s in b'', b'xyz', b'xyz'*100:
@@ -2407,6 +2415,22 @@ class AbstractPickleTests:
             self.assertEqual(x._reduce_called, 1)
             y = self.loads(s)
             self.assertEqual(y._reduce_called, 1)
+
+    def test_reduce_ex_None(self):
+        c = REX_None()
+        with self.assertRaises(TypeError):
+            self.dumps(c)
+
+    def test_reduce_None(self):
+        c = R_None()
+        with self.assertRaises(TypeError):
+            self.dumps(c)
+
+    def test_pickle_setstate_None(self):
+        c = C_None_setstate()
+        p = self.dumps(c)
+        with self.assertRaises(TypeError):
+            self.loads(p)
 
     @no_tracing
     def test_bad_getattr(self):
@@ -3349,6 +3373,21 @@ class REX_state(object):
     def __reduce__(self):
         return type(self), (), self.state
 
+class REX_None:
+    """ Setting __reduce_ex__ to None should fail """
+    __reduce_ex__ = None
+
+class R_None:
+    """ Setting __reduce__ to None should fail """
+    __reduce__ = None
+
+class C_None_setstate:
+    """  Setting __setstate__ to None should fail """
+    def __getstate__(self):
+        return 1
+
+    __setstate__ = None
+
 
 # Test classes for newobj
 
@@ -3830,6 +3869,25 @@ class AbstractPicklerUnpicklerObjectTests:
                 unpickler = self.unpickler_class(f)
                 self.assertEqual(unpickler.load(), data)
 
+    def test_pickle_invalid_reducer_override(self):
+        # gh-103035
+        obj = object()
+
+        f = io.BytesIO()
+        class MyPickler(self.pickler_class):
+            pass
+        pickler = MyPickler(f)
+        pickler.dump(obj)
+
+        pickler.clear_memo()
+        pickler.reducer_override = None
+        with self.assertRaises(TypeError):
+            pickler.dump(obj)
+
+        pickler.clear_memo()
+        pickler.reducer_override = 10
+        with self.assertRaises(TypeError):
+            pickler.dump(obj)
 
 # Tests for dispatch_table attribute
 
@@ -3991,6 +4049,15 @@ class AbstractDispatchTableTests:
             return f.getvalue()
 
         self._test_dispatch_table(dumps, dt)
+
+    def test_dispatch_table_None_item(self):
+        # gh-93627
+        obj = object()
+        f = io.BytesIO()
+        pickler = self.pickler_class(f)
+        pickler.dispatch_table = {type(obj): None}
+        with self.assertRaises(TypeError):
+            pickler.dump(obj)
 
     def _test_dispatch_table(self, dumps, dispatch_table):
         def custom_load_dump(obj):

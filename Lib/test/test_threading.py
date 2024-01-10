@@ -28,7 +28,7 @@ from test import support
 
 try:
     from test.support import interpreters
-except ModuleNotFoundError:
+except ImportError:
     interpreters = None
 
 threading_helper.requires_working_threading(module=True)
@@ -272,6 +272,14 @@ class ThreadTests(BaseTestCase):
         #Issue 29376
         self.assertTrue(threading._active[tid].is_alive())
         self.assertRegex(repr(threading._active[tid]), '_DummyThread')
+
+        # Issue gh-106236:
+        with self.assertRaises(RuntimeError):
+            threading._active[tid].join()
+        threading._active[tid]._started.clear()
+        with self.assertRaises(RuntimeError):
+            threading._active[tid].is_alive()
+
         del threading._active[tid]
 
     # PyThreadState_SetAsyncExc() is a CPython-only gimmick, not (currently)
@@ -368,8 +376,8 @@ class ThreadTests(BaseTestCase):
         # Issue 7481: Failure to start thread should cleanup the limbo map.
         def fail_new_thread(*args):
             raise threading.ThreadError()
-        _start_new_thread = threading._start_new_thread
-        threading._start_new_thread = fail_new_thread
+        _start_joinable_thread = threading._start_joinable_thread
+        threading._start_joinable_thread = fail_new_thread
         try:
             t = threading.Thread(target=lambda: None)
             self.assertRaises(threading.ThreadError, t.start)
@@ -377,7 +385,7 @@ class ThreadTests(BaseTestCase):
                 t in threading._limbo,
                 "Failed to cleanup _limbo map on failure of Thread.start().")
         finally:
-            threading._start_new_thread = _start_new_thread
+            threading._start_joinable_thread = _start_joinable_thread
 
     def test_finalize_running_thread(self):
         # Issue 1402: the PyGILState_Ensure / _Release functions may be called
@@ -473,6 +481,47 @@ class ThreadTests(BaseTestCase):
                     "#1703448 triggered after %d trials: %s" % (i, l))
         finally:
             sys.setswitchinterval(old_interval)
+
+    def test_join_from_multiple_threads(self):
+        # Thread.join() should be thread-safe
+        errors = []
+
+        def worker():
+            time.sleep(0.005)
+
+        def joiner(thread):
+            try:
+                thread.join()
+            except Exception as e:
+                errors.append(e)
+
+        for N in range(2, 20):
+            threads = [threading.Thread(target=worker)]
+            for i in range(N):
+                threads.append(threading.Thread(target=joiner,
+                                                args=(threads[0],)))
+            for t in threads:
+                t.start()
+            time.sleep(0.01)
+            for t in threads:
+                t.join()
+            if errors:
+                raise errors[0]
+
+    def test_join_with_timeout(self):
+        lock = _thread.allocate_lock()
+        lock.acquire()
+
+        def worker():
+            lock.acquire()
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        thread.join(timeout=0.01)
+        assert thread.is_alive()
+        lock.release()
+        thread.join()
+        assert not thread.is_alive()
 
     def test_no_refcycle_through_target(self):
         class RunSelfFunction(object):
@@ -1316,7 +1365,7 @@ class SubinterpThreadingTests(BaseTestCase):
         DONE = b'D'
 
         interp = interpreters.create()
-        interp.run(f"""if True:
+        interp.exec_sync(f"""if True:
             import os
             import threading
             import time
@@ -1795,6 +1844,30 @@ class PyRLockTests(lock_tests.RLockTests):
 class CRLockTests(lock_tests.RLockTests):
     locktype = staticmethod(threading._CRLock)
 
+    def test_signature(self):  # gh-102029
+        with warnings.catch_warnings(record=True) as warnings_log:
+            threading.RLock()
+        self.assertEqual(warnings_log, [])
+
+        arg_types = [
+            ((1,), {}),
+            ((), {'a': 1}),
+            ((1, 2), {'a': 1}),
+        ]
+        for args, kwargs in arg_types:
+            with self.subTest(args=args, kwargs=kwargs):
+                with self.assertWarns(DeprecationWarning):
+                    threading.RLock(*args, **kwargs)
+
+        # Subtypes with custom `__init__` are allowed (but, not recommended):
+        class CustomRLock(self.locktype):
+            def __init__(self, a, *, b) -> None:
+                super().__init__()
+
+        with warnings.catch_warnings(record=True) as warnings_log:
+            CustomRLock(1, b=2)
+        self.assertEqual(warnings_log, [])
+
 class EventTests(lock_tests.EventTests):
     eventtype = staticmethod(threading.Event)
 
@@ -1826,34 +1899,6 @@ class MiscTestCase(unittest.TestCase):
         not_exported = {'currentThread', 'activeCount'}
         support.check__all__(self, threading, ('threading', '_thread'),
                              extra=extra, not_exported=not_exported)
-
-    @requires_subprocess()
-    def test_gh112826_missing__thread__is_main_interpreter(self):
-        with os_helper.temp_dir() as tempdir:
-            modname = '_thread_fake'
-            import os.path
-            filename = os.path.join(tempdir, modname + '.py')
-            with open(filename, 'w') as outfile:
-                outfile.write("""if True:
-                    import _thread
-                    globals().update(vars(_thread))
-                    del _is_main_interpreter
-                    """)
-
-            expected_output = b'success!'
-            _, out, err = assert_python_ok("-c", f"""if True:
-                import sys
-                sys.path.insert(0, {tempdir!r})
-                import {modname}
-                sys.modules['_thread'] = {modname}
-                del sys.modules[{modname!r}]
-
-                import threading
-                print({expected_output.decode('utf-8')!r}, end='')
-                """)
-
-            self.assertEqual(out, expected_output)
-            self.assertEqual(err, b'')
 
 
 class InterruptMainTests(unittest.TestCase):

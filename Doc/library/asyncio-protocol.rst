@@ -749,7 +749,7 @@ received data, and close the connection::
         loop = asyncio.get_running_loop()
 
         server = await loop.create_server(
-            lambda: EchoServerProtocol(),
+            EchoServerProtocol,
             '127.0.0.1', 8888)
 
         async with server:
@@ -853,7 +853,7 @@ method, sends back received data::
         # One protocol instance will be created to serve all
         # client requests.
         transport, protocol = await loop.create_datagram_endpoint(
-            lambda: EchoServerProtocol(),
+            EchoServerProtocol,
             local_addr=('127.0.0.1', 9999))
 
         try:

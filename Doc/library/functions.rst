@@ -286,7 +286,7 @@ are always available.  They are listed here in alphabetical order.
       ``__name__``, ``__qualname__``, ``__doc__`` and ``__annotations__``) and
       have a new ``__wrapped__`` attribute.
 
-   .. versionchanged:: 3.11
+   .. deprecated-removed:: 3.11 3.13
       Class methods can no longer wrap other :term:`descriptors <descriptor>` such as
       :func:`property`.
 
@@ -1772,7 +1772,7 @@ are always available.  They are listed here in alphabetical order.
       The *start* parameter can be specified as a keyword argument.
 
    .. versionchanged:: 3.12 Summation of floats switched to an algorithm
-      that gives higher accuracy on most builds.
+      that gives higher accuracy and better commutativity on most builds.
 
 
 .. class:: super()
@@ -1799,6 +1799,13 @@ are always available.  They are listed here in alphabetical order.
    the second argument is an object, ``isinstance(obj, type)`` must be true.  If
    the second argument is a type, ``issubclass(type2, type)`` must be true (this
    is useful for classmethods).
+
+   When called directly within an ordinary method of a class, both arguments may
+   be omitted ("zero-argument :func:`!super`"). In this case, *type* will be the
+   enclosing class, and *obj* will be the first argument of the immediately
+   enclosing function (typically ``self``). (This means that zero-argument
+   :func:`!super` will not work as expected within nested functions, including
+   generator expressions, which implicitly create nested functions.)
 
    There are two typical use cases for *super*.  In a class hierarchy with
    single inheritance, *super* can be used to refer to parent classes without

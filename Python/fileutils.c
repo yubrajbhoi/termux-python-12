@@ -2,8 +2,11 @@
 #include "pycore_fileutils.h"     // fileutils definitions
 #include "pycore_runtime.h"       // _PyRuntime
 #include "osdefs.h"               // SEP
-#include <locale.h>
+
 #include <stdlib.h>               // mbstowcs()
+#ifdef HAVE_UNISTD_H
+#  include <unistd.h>             // getcwd()
+#endif
 
 #ifdef MS_WINDOWS
 #  include <malloc.h>
@@ -19,7 +22,7 @@ extern int winerror_to_errno(int);
 #endif
 
 #ifdef HAVE_LANGINFO_H
-#include <langinfo.h>
+#  include <langinfo.h>           // nl_langinfo(CODESET)
 #endif
 
 #ifdef HAVE_SYS_IOCTL_H
@@ -27,12 +30,12 @@ extern int winerror_to_errno(int);
 #endif
 
 #ifdef HAVE_NON_UNICODE_WCHAR_T_REPRESENTATION
-#include <iconv.h>
+#  include <iconv.h>              // iconv_open()
 #endif
 
 #ifdef HAVE_FCNTL_H
-#include <fcntl.h>
-#endif /* HAVE_FCNTL_H */
+#  include <fcntl.h>              // fcntl(F_GETFD)
+#endif
 
 #ifdef O_CLOEXEC
 /* Does open() support the O_CLOEXEC flag? Possible values:
@@ -105,14 +108,14 @@ _Py_device_encoding(int fd)
 #else
     if (_PyRuntime.preconfig.utf8_mode) {
         _Py_DECLARE_STR(utf_8, "utf-8");
-        return Py_NewRef(&_Py_STR(utf_8));
+        return &_Py_STR(utf_8);
     }
     return _Py_GetLocaleEncodingObject();
 #endif
 }
 
 
-static size_t
+static int
 is_valid_wide_char(wchar_t ch)
 {
 #ifdef HAVE_NON_UNICODE_WCHAR_T_REPRESENTATION
@@ -2875,9 +2878,9 @@ done:
  *    non-opened fd in the middle.
  * 2b. If fdwalk(3) isn't available, just do a plain close(2) loop.
  */
-#ifdef __FreeBSD__
+#ifdef HAVE_CLOSEFROM
 #  define USE_CLOSEFROM
-#endif /* __FreeBSD__ */
+#endif /* HAVE_CLOSEFROM */
 
 #ifdef HAVE_FDWALK
 #  define USE_FDWALK
@@ -2919,7 +2922,7 @@ _Py_closerange(int first, int last)
 #ifdef USE_CLOSEFROM
     if (last >= sysconf(_SC_OPEN_MAX)) {
         /* Any errors encountered while closing file descriptors are ignored */
-        closefrom(first);
+        (void)closefrom(first);
     }
     else
 #endif /* USE_CLOSEFROM */
@@ -2940,3 +2943,27 @@ _Py_closerange(int first, int last)
 #endif /* USE_FDWALK */
     _Py_END_SUPPRESS_IPH
 }
+
+
+#ifndef MS_WINDOWS
+// Ticks per second used by clock() and times() functions.
+// See os.times() and time.process_time() implementations.
+int
+_Py_GetTicksPerSecond(long *ticks_per_second)
+{
+#if defined(HAVE_SYSCONF) && defined(_SC_CLK_TCK)
+    long value = sysconf(_SC_CLK_TCK);
+    if (value < 1) {
+        return -1;
+    }
+    *ticks_per_second = value;
+#elif defined(HZ)
+    assert(HZ >= 1);
+    *ticks_per_second = HZ;
+#else
+    // Magic fallback value; may be bogus
+    *ticks_per_second = 60;
+#endif
+    return 0;
+}
+#endif

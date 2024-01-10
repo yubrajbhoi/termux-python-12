@@ -66,10 +66,6 @@ else:
     class EmptyStruct(ctypes.Structure):
         pass
 
-# Does io.IOBase finalizer log the exception if the close() method fails?
-# The exception is ignored silently by default in release build.
-IOBASE_EMITS_UNRAISABLE = (support.Py_DEBUG or sys.flags.dev_mode)
-
 
 def _default_chunk_size():
     """Get the default TextIOWrapper chunk size"""
@@ -1222,10 +1218,7 @@ class CommonBufferedTests:
             with self.assertRaises(AttributeError):
                 self.tp(rawio).xyzzy
 
-            if not IOBASE_EMITS_UNRAISABLE:
-                self.assertIsNone(cm.unraisable)
-            elif cm.unraisable is not None:
-                self.assertEqual(cm.unraisable.exc_type, OSError)
+            self.assertEqual(cm.unraisable.exc_type, OSError)
 
     def test_repr(self):
         raw = self.MockRawIO()
@@ -1241,11 +1234,9 @@ class CommonBufferedTests:
         # Issue #25455
         raw = self.MockRawIO()
         b = self.tp(raw)
-        with support.swap_attr(raw, 'name', b):
-            try:
+        with support.swap_attr(raw, 'name', b), support.infinite_recursion(25):
+            with self.assertRaises(RuntimeError):
                 repr(b)  # Should not crash
-            except RuntimeError:
-                pass
 
     def test_flush_error_on_close(self):
         # Test that buffered file is closed despite failed flush
@@ -1663,7 +1654,8 @@ class BufferedReaderTest(unittest.TestCase, CommonBufferedTests):
 class CBufferedReaderTest(BufferedReaderTest, SizeofTest):
     tp = io.BufferedReader
 
-    @skip_if_sanitizer(memory=True, address=True, reason= "sanitizer defaults to crashing "
+    @skip_if_sanitizer(memory=True, address=True, thread=True,
+                       reason="sanitizer defaults to crashing "
                        "instead of returning NULL for malloc failure.")
     def test_constructor(self):
         BufferedReaderTest.test_constructor(self)
@@ -2030,7 +2022,8 @@ class BufferedWriterTest(unittest.TestCase, CommonBufferedTests):
 class CBufferedWriterTest(BufferedWriterTest, SizeofTest):
     tp = io.BufferedWriter
 
-    @skip_if_sanitizer(memory=True, address=True, reason= "sanitizer defaults to crashing "
+    @skip_if_sanitizer(memory=True, address=True, thread=True,
+                       reason="sanitizer defaults to crashing "
                        "instead of returning NULL for malloc failure.")
     def test_constructor(self):
         BufferedWriterTest.test_constructor(self)
@@ -2529,7 +2522,8 @@ class BufferedRandomTest(BufferedReaderTest, BufferedWriterTest):
 class CBufferedRandomTest(BufferedRandomTest, SizeofTest):
     tp = io.BufferedRandom
 
-    @skip_if_sanitizer(memory=True, address=True, reason= "sanitizer defaults to crashing "
+    @skip_if_sanitizer(memory=True, address=True, thread=True,
+                       reason="sanitizer defaults to crashing "
                        "instead of returning NULL for malloc failure.")
     def test_constructor(self):
         BufferedRandomTest.test_constructor(self)
@@ -2808,11 +2802,16 @@ class TextIOWrapperTest(unittest.TestCase):
         # Issue #25455
         raw = self.BytesIO()
         t = self.TextIOWrapper(raw, encoding="utf-8")
-        with support.swap_attr(raw, 'name', t):
-            try:
+        with support.swap_attr(raw, 'name', t), support.infinite_recursion(25):
+            with self.assertRaises(RuntimeError):
                 repr(t)  # Should not crash
-            except RuntimeError:
-                pass
+
+    def test_subclass_repr(self):
+        class TestSubclass(self.TextIOWrapper):
+            pass
+
+        f = TestSubclass(self.StringIO())
+        self.assertIn(TestSubclass.__name__, repr(f))
 
     def test_line_buffering(self):
         r = self.BytesIO()
@@ -3047,10 +3046,7 @@ class TextIOWrapperTest(unittest.TestCase):
             with self.assertRaises(AttributeError):
                 self.TextIOWrapper(rawio, encoding="utf-8").xyzzy
 
-            if not IOBASE_EMITS_UNRAISABLE:
-                self.assertIsNone(cm.unraisable)
-            elif cm.unraisable is not None:
-                self.assertEqual(cm.unraisable.exc_type, OSError)
+            self.assertEqual(cm.unraisable.exc_type, OSError)
 
     # Systematic tests of the text I/O API
 
@@ -3891,6 +3887,14 @@ class TextIOWrapperTest(unittest.TestCase):
         t.write('x')
         t.tell()
 
+    def test_issue35928(self):
+        p = self.BufferedRWPair(self.BytesIO(b'foo\nbar\n'), self.BytesIO())
+        f = self.TextIOWrapper(p)
+        res = f.readline()
+        self.assertEqual(res, 'foo\n')
+        f.write(res)
+        self.assertEqual(res + f.readline(), 'foo\nbar\n')
+
 
 class MemviewBytesIO(io.BytesIO):
     '''A BytesIO object whose read method returns memoryviews
@@ -4483,11 +4487,11 @@ class MiscIOTest(unittest.TestCase):
         ''')
         proc = assert_python_ok('-X', 'warn_default_encoding', '-c', code)
         warnings = proc.err.splitlines()
-        self.assertEqual(len(warnings), 2)
+        self.assertEqual(len(warnings), 4)
         self.assertTrue(
             warnings[0].startswith(b"<string>:5: EncodingWarning: "))
         self.assertTrue(
-            warnings[1].startswith(b"<string>:8: EncodingWarning: "))
+            warnings[2].startswith(b"<string>:8: EncodingWarning: "))
 
     def test_text_encoding(self):
         # PEP 597, bpo-47000. io.text_encoding() returns "locale" or "utf-8"

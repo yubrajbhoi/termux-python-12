@@ -476,7 +476,7 @@ The :mod:`trace` module contains the following notice::
 UUencode and UUdecode functions
 -------------------------------
 
-The :mod:`uu` module contains the following notice::
+The ``uu`` codec contains the following notice::
 
    Copyright 1994 by Lance Ellinghouse
    Cathedral City, California Republic, United States of America.
@@ -655,7 +655,7 @@ copyright and licensing notice::
 OpenSSL
 -------
 
-The modules :mod:`hashlib`, :mod:`posix`, :mod:`ssl`, :mod:`crypt` use
+The modules :mod:`hashlib`, :mod:`posix` and :mod:`ssl` use
 the OpenSSL library for added performance if made available by the
 operating system. Additionally, the Windows and macOS installers for
 Python may include a copy of the OpenSSL libraries, so we include a copy
@@ -1042,29 +1042,27 @@ https://www.w3.org/TR/xml-c14n2-testcases/ and is distributed under the
    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-Audioop
--------
+mimalloc
+--------
 
-The audioop module uses the code base in g771.c file of the SoX project::
+MIT License
 
-    Programming the AdLib/Sound Blaster
-    FM Music Chips
-    Version 2.0 (24 Feb 1992)
-    Copyright (c) 1991, 1992 by Jeffrey S. Lee
-    jlee@smylex.uucp
-    Warranty and Copyright Policy
-    This document is provided on an "as-is" basis, and its author makes
-    no warranty or representation, express or implied, with respect to
-    its quality performance or fitness for a particular purpose.  In no
-    event will the author of this document be liable for direct, indirect,
-    special, incidental, or consequential damages arising out of the use
-    or inability to use the information contained within.  Use of this
-    document is at your own risk.
-    This file may be used and copied freely so long as the applicable
-    copyright notices are retained, and no modifications are made to the
-    text of the document.  No money shall be charged for its distribution
-    beyond reasonable shipping, handling and duplication costs, nor shall
-    proprietary changes be made to this document so that it cannot be
-    distributed freely.  This document may not be included in published
-    material or commercial packages without the written consent of its
-    author.
+Copyright (c) 2018-2021 Microsoft Corporation, Daan Leijen
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -6,13 +6,12 @@
    Version 3 of this protocol properly supports circular links
    and sharing. */
 
-#define PY_SSIZE_T_CLEAN
-
 #include "Python.h"
 #include "pycore_call.h"          // _PyObject_CallNoArgs()
 #include "pycore_code.h"          // _PyCode_New()
-#include "pycore_long.h"          // _PyLong_DigitCount
 #include "pycore_hashtable.h"     // _Py_hashtable_t
+#include "pycore_long.h"          // _PyLong_DigitCount
+#include "pycore_setobject.h"     // _PySet_NextEntry()
 #include "marshal.h"              // Py_MARSHAL_VERSION
 
 /*[clinic input]
@@ -1016,7 +1015,7 @@ r_object(RFILE *p)
         break;
 
     case TYPE_NONE:
-        retval = Py_NewRef(Py_None);
+        retval = Py_None;
         break;
 
     case TYPE_STOPITER:
@@ -1024,15 +1023,15 @@ r_object(RFILE *p)
         break;
 
     case TYPE_ELLIPSIS:
-        retval = Py_NewRef(Py_Ellipsis);
+        retval = Py_Ellipsis;
         break;
 
     case TYPE_FALSE:
-        retval = Py_NewRef(Py_False);
+        retval = Py_False;
         break;
 
     case TYPE_TRUE:
-        retval = Py_NewRef(Py_True);
+        retval = Py_True;
         break;
 
     case TYPE_INT:
@@ -1717,7 +1716,7 @@ marshal_dump_impl(PyObject *module, PyObject *value, PyObject *file,
     s = PyMarshal_WriteObjectToString(value, version);
     if (s == NULL)
         return NULL;
-    res = _PyObject_CallMethodOneArg(file, &_Py_ID(write), s);
+    res = PyObject_CallMethodOneArg(file, &_Py_ID(write), s);
     Py_DECREF(s);
     return res;
 }

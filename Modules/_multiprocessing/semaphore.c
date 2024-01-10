@@ -9,6 +9,10 @@
 
 #include "multiprocessing.h"
 
+#ifdef HAVE_SYS_TIME_H
+#  include <sys/time.h>           // gettimeofday()
+#endif
+
 #ifdef HAVE_MP_SEMAPHORE
 
 enum { RECURSIVE_MUTEX, SEMAPHORE };
@@ -735,13 +739,13 @@ static PyMethodDef semlock_methods[] = {
  */
 
 static PyMemberDef semlock_members[] = {
-    {"handle", T_SEM_HANDLE, offsetof(SemLockObject, handle), READONLY,
+    {"handle", T_SEM_HANDLE, offsetof(SemLockObject, handle), Py_READONLY,
      ""},
-    {"kind", T_INT, offsetof(SemLockObject, kind), READONLY,
+    {"kind", Py_T_INT, offsetof(SemLockObject, kind), Py_READONLY,
      ""},
-    {"maxvalue", T_INT, offsetof(SemLockObject, maxvalue), READONLY,
+    {"maxvalue", Py_T_INT, offsetof(SemLockObject, maxvalue), Py_READONLY,
      ""},
-    {"name", T_STRING, offsetof(SemLockObject, name), READONLY,
+    {"name", Py_T_STRING, offsetof(SemLockObject, name), Py_READONLY,
      ""},
     {NULL}
 };

@@ -765,6 +765,15 @@ class TestRecursiveRepr(unittest.TestCase):
         for name in assigned:
             self.assertIs(getattr(wrapper, name), getattr(wrapped, name))
 
+    def test__wrapped__(self):
+        class X:
+            def __repr__(self):
+                return 'X()'
+            f = __repr__ # save reference to check it later
+            __repr__ = recursive_repr()(__repr__)
+
+        self.assertIs(X.f, X.__repr__.__wrapped__)
+
     def test__type_params__(self):
         class My:
             @recursive_repr()

@@ -2,16 +2,16 @@
 
 #include "Python.h"
 #include "opcode.h"
-#include "structmember.h"         // PyMemberDef
+
 #include "pycore_code.h"          // _PyCodeConstructor
 #include "pycore_frame.h"         // FRAME_SPECIALS_SIZE
 #include "pycore_interp.h"        // PyInterpreterState.co_extra_freefuncs
-#include "pycore_opcode.h"        // _PyOpcode_Deopt
+#include "pycore_opcode_metadata.h" // _PyOpcode_Deopt, _PyOpcode_Caches
+#include "pycore_opcode_utils.h"  // RESUME_AT_FUNC_START
 #include "pycore_pystate.h"       // _PyInterpreterState_GET()
+#include "pycore_setobject.h"     // _PySet_NextEntry()
 #include "pycore_tuple.h"         // _PyTuple_ITEMS()
 #include "clinic/codeobject.c.h"
-
-static PyObject* code_repr(PyCodeObject *co);
 
 static const char *
 code_event_name(PyCodeEvent event) {
@@ -40,21 +40,9 @@ notify_code_watchers(PyCodeEvent event, PyCodeObject *co)
             // callback must be non-null if the watcher bit is set
             assert(cb != NULL);
             if (cb(event, co) < 0) {
-                // Don't risk resurrecting the object if an unraisablehook keeps
-                // a reference; pass a string as context.
-                PyObject *context = NULL;
-                PyObject *repr = code_repr(co);
-                if (repr) {
-                    context = PyUnicode_FromFormat(
-                        "%s watcher callback for %U",
-                        code_event_name(event), repr);
-                    Py_DECREF(repr);
-                }
-                if (context == NULL) {
-                    context = Py_NewRef(Py_None);
-                }
-                PyErr_WriteUnraisable(context);
-                Py_DECREF(context);
+                PyErr_FormatUnraisable(
+                    "Exception ignored in %s watcher callback for %R",
+                    code_event_name(event), co);
             }
         }
         i++;
@@ -153,10 +141,6 @@ intern_string_constants(PyObject *tuple, int *modified)
     for (Py_ssize_t i = PyTuple_GET_SIZE(tuple); --i >= 0; ) {
         PyObject *v = PyTuple_GET_ITEM(tuple, i);
         if (PyUnicode_CheckExact(v)) {
-            if (PyUnicode_READY(v) == -1) {
-                return -1;
-            }
-
             if (all_name_chars(v)) {
                 PyObject *w = v;
                 PyUnicode_InternInPlace(&v);
@@ -398,6 +382,9 @@ init_code(PyCodeObject *co, struct _PyCodeConstructor *con)
     int nlocals, ncellvars, nfreevars;
     get_localsplus_counts(con->localsplusnames, con->localspluskinds,
                           &nlocals, &ncellvars, &nfreevars);
+    if (con->stacksize == 0) {
+        con->stacksize = 1;
+    }
 
     co->co_filename = Py_NewRef(con->filename);
     co->co_name = Py_NewRef(con->name);
@@ -427,9 +414,10 @@ init_code(PyCodeObject *co, struct _PyCodeConstructor *con)
     co->co_framesize = nlocalsplus + con->stacksize + FRAME_SPECIALS_SIZE;
     co->co_ncellvars = ncellvars;
     co->co_nfreevars = nfreevars;
-    co->co_version = _Py_next_func_version;
-    if (_Py_next_func_version != 0) {
-        _Py_next_func_version++;
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    co->co_version = interp->next_func_version;
+    if (interp->next_func_version != 0) {
+        interp->next_func_version++;
     }
     co->_co_monitoring = NULL;
     co->_co_instrumentation_version = 0;
@@ -437,6 +425,7 @@ init_code(PyCodeObject *co, struct _PyCodeConstructor *con)
     co->co_weakreflist = NULL;
     co->co_extra = NULL;
     co->_co_cached = NULL;
+    co->co_executors = NULL;
 
     memcpy(_PyCode_CODE(co), PyBytes_AS_STRING(con->code),
            PyBytes_GET_SIZE(con->code));
@@ -546,17 +535,6 @@ remove_column_info(PyObject *locations)
 PyCodeObject *
 _PyCode_New(struct _PyCodeConstructor *con)
 {
-    /* Ensure that strings are ready Unicode string */
-    if (PyUnicode_READY(con->name) < 0) {
-        return NULL;
-    }
-    if (PyUnicode_READY(con->qualname) < 0) {
-        return NULL;
-    }
-    if (PyUnicode_READY(con->filename) < 0) {
-        return NULL;
-    }
-
     if (intern_strings(con->names) < 0) {
         return NULL;
     }
@@ -771,7 +749,7 @@ PyUnstable_Code_New(int argcount, int kwonlyargcount,
 // test.test_code.CodeLocationTest.test_code_new_empty to keep it in sync!
 
 static const uint8_t assert0[6] = {
-    RESUME, 0,
+    RESUME, RESUME_AT_FUNC_START,
     LOAD_ASSERTION_ERROR, 0,
     RAISE_VARARGS, 1
 };
@@ -1509,11 +1487,44 @@ PyCode_GetFreevars(PyCodeObject *code)
 }
 
 static void
+clear_executors(PyCodeObject *co)
+{
+    for (int i = 0; i < co->co_executors->size; i++) {
+        Py_CLEAR(co->co_executors->executors[i]);
+    }
+    PyMem_Free(co->co_executors);
+    co->co_executors = NULL;
+}
+
+void
+_PyCode_Clear_Executors(PyCodeObject *code) {
+    int code_len = (int)Py_SIZE(code);
+    for (int i = 0; i < code_len; i += _PyInstruction_GetLength(code, i)) {
+        _Py_CODEUNIT *instr = &_PyCode_CODE(code)[i];
+        uint8_t opcode = instr->op.code;
+        uint8_t oparg = instr->op.arg;
+        if (opcode == ENTER_EXECUTOR) {
+            _PyExecutorObject *exec = code->co_executors->executors[oparg];
+            assert(exec->vm_data.opcode != ENTER_EXECUTOR);
+            instr->op.code = exec->vm_data.opcode;
+            instr->op.arg = exec->vm_data.oparg;
+        }
+    }
+    clear_executors(code);
+}
+
+static void
 deopt_code(PyCodeObject *code, _Py_CODEUNIT *instructions)
 {
     Py_ssize_t len = Py_SIZE(code);
     for (int i = 0; i < len; i++) {
         int opcode = _Py_GetBaseOpcode(code, i);
+        if (opcode == ENTER_EXECUTOR) {
+            _PyExecutorObject *exec = code->co_executors->executors[instructions[i].op.arg];
+            opcode = _PyOpcode_Deopt[exec->vm_data.opcode];
+            instructions[i].op.arg = exec->vm_data.oparg;
+        }
+        assert(opcode != ENTER_EXECUTOR);
         int caches = _PyOpcode_Caches[opcode];
         instructions[i].op.code = opcode;
         for (int j = 1; j <= caches; j++) {
@@ -1721,6 +1732,9 @@ code_dealloc(PyCodeObject *co)
 
         PyMem_Free(co_extra);
     }
+    if (co->co_executors != NULL) {
+        clear_executors(co);
+    }
 
     Py_XDECREF(co->co_consts);
     Py_XDECREF(co->co_names);
@@ -1800,13 +1814,31 @@ code_richcompare(PyObject *self, PyObject *other, int op)
     for (int i = 0; i < Py_SIZE(co); i++) {
         _Py_CODEUNIT co_instr = _PyCode_CODE(co)[i];
         _Py_CODEUNIT cp_instr = _PyCode_CODE(cp)[i];
-        co_instr.op.code = _Py_GetBaseOpcode(co, i);
-        cp_instr.op.code = _Py_GetBaseOpcode(cp, i);
-        eq = co_instr.cache == cp_instr.cache;
-        if (!eq) {
+        uint8_t co_code = _Py_GetBaseOpcode(co, i);
+        uint8_t co_arg = co_instr.op.arg;
+        uint8_t cp_code = _Py_GetBaseOpcode(cp, i);
+        uint8_t cp_arg = cp_instr.op.arg;
+
+        if (co_code == ENTER_EXECUTOR) {
+            const int exec_index = co_arg;
+            _PyExecutorObject *exec = co->co_executors->executors[exec_index];
+            co_code = _PyOpcode_Deopt[exec->vm_data.opcode];
+            co_arg = exec->vm_data.oparg;
+        }
+        assert(co_code != ENTER_EXECUTOR);
+
+        if (cp_code == ENTER_EXECUTOR) {
+            const int exec_index = cp_arg;
+            _PyExecutorObject *exec = cp->co_executors->executors[exec_index];
+            cp_code = _PyOpcode_Deopt[exec->vm_data.opcode];
+            cp_arg = exec->vm_data.oparg;
+        }
+        assert(cp_code != ENTER_EXECUTOR);
+
+        if (co_code != cp_code || co_arg != cp_arg) {
             goto unequal;
         }
-        i += _PyOpcode_Caches[co_instr.op.code];
+        i += _PyOpcode_Caches[co_code];
     }
 
     /* compare constants */
@@ -1885,10 +1917,22 @@ code_hash(PyCodeObject *co)
     SCRAMBLE_IN(co->co_firstlineno);
     SCRAMBLE_IN(Py_SIZE(co));
     for (int i = 0; i < Py_SIZE(co); i++) {
-        int deop = _Py_GetBaseOpcode(co, i);
-        SCRAMBLE_IN(deop);
-        SCRAMBLE_IN(_PyCode_CODE(co)[i].op.arg);
-        i += _PyOpcode_Caches[deop];
+        _Py_CODEUNIT co_instr = _PyCode_CODE(co)[i];
+        uint8_t co_code = co_instr.op.code;
+        uint8_t co_arg = co_instr.op.arg;
+        if (co_code == ENTER_EXECUTOR) {
+            _PyExecutorObject *exec = co->co_executors->executors[co_arg];
+            assert(exec != NULL);
+            assert(exec->vm_data.opcode != ENTER_EXECUTOR);
+            co_code = _PyOpcode_Deopt[exec->vm_data.opcode];
+            co_arg = exec->vm_data.oparg;
+        }
+        else {
+            co_code = _Py_GetBaseOpcode(co, i);
+        }
+        SCRAMBLE_IN(co_code);
+        SCRAMBLE_IN(co_arg);
+        i += _PyOpcode_Caches[co_code];
     }
     if ((Py_hash_t)uhash == -1) {
         return -2;
@@ -1900,20 +1944,20 @@ code_hash(PyCodeObject *co)
 #define OFF(x) offsetof(PyCodeObject, x)
 
 static PyMemberDef code_memberlist[] = {
-    {"co_argcount",        T_INT,    OFF(co_argcount),        READONLY},
-    {"co_posonlyargcount", T_INT,    OFF(co_posonlyargcount), READONLY},
-    {"co_kwonlyargcount",  T_INT,    OFF(co_kwonlyargcount),  READONLY},
-    {"co_stacksize",       T_INT,    OFF(co_stacksize),       READONLY},
-    {"co_flags",           T_INT,    OFF(co_flags),           READONLY},
-    {"co_nlocals",         T_INT,    OFF(co_nlocals),         READONLY},
-    {"co_consts",          T_OBJECT, OFF(co_consts),          READONLY},
-    {"co_names",           T_OBJECT, OFF(co_names),           READONLY},
-    {"co_filename",        T_OBJECT, OFF(co_filename),        READONLY},
-    {"co_name",            T_OBJECT, OFF(co_name),            READONLY},
-    {"co_qualname",        T_OBJECT, OFF(co_qualname),        READONLY},
-    {"co_firstlineno",     T_INT,    OFF(co_firstlineno),     READONLY},
-    {"co_linetable",       T_OBJECT, OFF(co_linetable),       READONLY},
-    {"co_exceptiontable",  T_OBJECT, OFF(co_exceptiontable),  READONLY},
+    {"co_argcount",        Py_T_INT,     OFF(co_argcount),        Py_READONLY},
+    {"co_posonlyargcount", Py_T_INT,     OFF(co_posonlyargcount), Py_READONLY},
+    {"co_kwonlyargcount",  Py_T_INT,     OFF(co_kwonlyargcount),  Py_READONLY},
+    {"co_stacksize",       Py_T_INT,     OFF(co_stacksize),       Py_READONLY},
+    {"co_flags",           Py_T_INT,     OFF(co_flags),           Py_READONLY},
+    {"co_nlocals",         Py_T_INT,     OFF(co_nlocals),         Py_READONLY},
+    {"co_consts",          _Py_T_OBJECT, OFF(co_consts),          Py_READONLY},
+    {"co_names",           _Py_T_OBJECT, OFF(co_names),           Py_READONLY},
+    {"co_filename",        _Py_T_OBJECT, OFF(co_filename),        Py_READONLY},
+    {"co_name",            _Py_T_OBJECT, OFF(co_name),            Py_READONLY},
+    {"co_qualname",        _Py_T_OBJECT, OFF(co_qualname),        Py_READONLY},
+    {"co_firstlineno",     Py_T_INT,     OFF(co_firstlineno),     Py_READONLY},
+    {"co_linetable",       _Py_T_OBJECT, OFF(co_linetable),       Py_READONLY},
+    {"co_exceptiontable",  _Py_T_OBJECT, OFF(co_exceptiontable),  Py_READONLY},
     {NULL}      /* Sentinel */
 };
 
@@ -2133,6 +2177,7 @@ static struct PyMethodDef code_methods[] = {
     {"co_positions", (PyCFunction)code_positionsiterator, METH_NOARGS},
     CODE_REPLACE_METHODDEF
     CODE__VARNAME_FROM_OPARG_METHODDEF
+    {"__replace__", _PyCFunction_CAST(code_replace), METH_FASTCALL|METH_KEYWORDS},
     {NULL, NULL}                /* sentinel */
 };
 
@@ -2316,6 +2361,9 @@ void
 _PyStaticCode_Fini(PyCodeObject *co)
 {
     deopt_code(co, _PyCode_CODE(co));
+    if (co->co_executors != NULL) {
+        clear_executors(co);
+    }
     PyMem_Free(co->co_extra);
     if (co->_co_cached != NULL) {
         Py_CLEAR(co->_co_cached->_co_code);
@@ -2354,76 +2402,3 @@ _PyStaticCode_Init(PyCodeObject *co)
 }
 
 #define MAX_CODE_UNITS_PER_LOC_ENTRY 8
-
-PyCodeObject *
-_Py_MakeShimCode(const _PyShimCodeDef *codedef)
-{
-    PyObject *name = NULL;
-    PyObject *co_code = NULL;
-    PyObject *lines = NULL;
-    PyCodeObject *codeobj = NULL;
-    uint8_t *loc_table = NULL;
-
-    name = _PyUnicode_FromASCII(codedef->cname, strlen(codedef->cname));
-    if (name == NULL) {
-        goto cleanup;
-    }
-    co_code = PyBytes_FromStringAndSize(
-        (const char *)codedef->code, codedef->codelen);
-    if (co_code == NULL) {
-        goto cleanup;
-    }
-    int code_units = codedef->codelen / sizeof(_Py_CODEUNIT);
-    int loc_entries = (code_units + MAX_CODE_UNITS_PER_LOC_ENTRY - 1) /
-                      MAX_CODE_UNITS_PER_LOC_ENTRY;
-    loc_table = PyMem_Malloc(loc_entries);
-    if (loc_table == NULL) {
-        PyErr_NoMemory();
-        goto cleanup;
-    }
-    for (int i = 0; i < loc_entries-1; i++) {
-         loc_table[i] = 0x80 | (PY_CODE_LOCATION_INFO_NONE << 3) | 7;
-         code_units -= MAX_CODE_UNITS_PER_LOC_ENTRY;
-    }
-    assert(loc_entries > 0);
-    assert(code_units > 0 && code_units <= MAX_CODE_UNITS_PER_LOC_ENTRY);
-    loc_table[loc_entries-1] = 0x80 |
-        (PY_CODE_LOCATION_INFO_NONE << 3) | (code_units-1);
-    lines = PyBytes_FromStringAndSize((const char *)loc_table, loc_entries);
-    PyMem_Free(loc_table);
-    if (lines == NULL) {
-        goto cleanup;
-    }
-    _Py_DECLARE_STR(shim_name, "<shim>");
-    struct _PyCodeConstructor con = {
-        .filename = &_Py_STR(shim_name),
-        .name = name,
-        .qualname = name,
-        .flags = CO_NEWLOCALS | CO_OPTIMIZED,
-
-        .code = co_code,
-        .firstlineno = 1,
-        .linetable = lines,
-
-        .consts = (PyObject *)&_Py_SINGLETON(tuple_empty),
-        .names = (PyObject *)&_Py_SINGLETON(tuple_empty),
-
-        .localsplusnames = (PyObject *)&_Py_SINGLETON(tuple_empty),
-        .localspluskinds = (PyObject *)&_Py_SINGLETON(bytes_empty),
-
-        .argcount = 0,
-        .posonlyargcount = 0,
-        .kwonlyargcount = 0,
-
-        .stacksize = codedef->stacksize,
-
-        .exceptiontable = (PyObject *)&_Py_SINGLETON(bytes_empty),
-    };
-
-    codeobj = _PyCode_New(&con);
-cleanup:
-    Py_XDECREF(name);
-    Py_XDECREF(co_code);
-    Py_XDECREF(lines);
-    return codeobj;
-}

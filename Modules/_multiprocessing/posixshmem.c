@@ -2,80 +2,20 @@
 posixshmem - A Python extension that provides shm_open() and shm_unlink()
 */
 
-#define PY_SSIZE_T_CLEAN
+#include "pyconfig.h"   // Py_GIL_DISABLED
+
+#ifndef Py_GIL_DISABLED
+// Need limited C API version 3.12 for Py_MOD_PER_INTERPRETER_GIL_SUPPORTED
+#define Py_LIMITED_API 0x030c0000
+#endif
 
 #include <Python.h>
 
-// for shm_open() and shm_unlink()
+#include <errno.h>                // EINTR
 #ifdef HAVE_SYS_MMAN_H
-#include <sys/mman.h>
+#  include <sys/mman.h>           // shm_open(), shm_unlink()
 #endif
 
-#ifdef __ANDROID__
-#include <alloca.h>
-#include <fcntl.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-static int shm_unlink(const char *name) {
-    size_t namelen;
-    char *fname;
-
-    /* Construct the filename.  */
-    while (name[0] == '/') ++name;
-
-    if (name[0] == '\0') {
-        /* The name "/" is not supported.  */
-        errno = EINVAL;
-        return -1;
-    }
-
-    namelen = strlen(name);
-    fname = (char *) alloca(sizeof("/data/data/com.termux/files/usr/tmp/") - 1 + namelen + 1);
-    memcpy(fname, "/data/data/com.termux/files/usr/tmp/", sizeof("/data/data/com.termux/files/usr/tmp/") - 1);
-    memcpy(fname + sizeof("/data/data/com.termux/files/usr/tmp/") - 1, name, namelen + 1);
-
-    return unlink(fname);
-}
-
-static int shm_open(const char *name, int oflag, mode_t mode) {
-    size_t namelen;
-    char *fname;
-    int fd;
-
-    /* Construct the filename.  */
-    while (name[0] == '/') ++name;
-
-    if (name[0] == '\0') {
-        /* The name "/" is not supported.  */
-        errno = EINVAL;
-        return -1;
-    }
-
-    namelen = strlen(name);
-    fname = (char *) alloca(sizeof("/data/data/com.termux/files/usr/tmp/") - 1 + namelen + 1);
-    memcpy(fname, "/data/data/com.termux/files/usr/tmp/", sizeof("/data/data/com.termux/files/usr/tmp/") - 1);
-    memcpy(fname + sizeof("/data/data/com.termux/files/usr/tmp/") - 1, name, namelen + 1);
-
-    fd = open(fname, oflag, mode);
-    if (fd != -1) {
-        /* We got a descriptor.  Now set the FD_CLOEXEC bit.  */
-        int flags = fcntl(fd, F_GETFD, 0);
-        flags |= FD_CLOEXEC;
-        flags = fcntl(fd, F_SETFD, flags);
-
-        if (flags == -1) {
-            /* Something went wrong.  We cannot return the descriptor.  */
-            int save_errno = errno;
-            close(fd);
-            fd = -1;
-            errno = save_errno;
-        }
-    }
-
-    return fd;
-}
-#endif
 
 /*[clinic input]
 module _posixshmem
@@ -108,7 +48,7 @@ _posixshmem_shm_open_impl(PyObject *module, PyObject *path, int flags,
 {
     int fd;
     int async_err = 0;
-    const char *name = PyUnicode_AsUTF8(path);
+    const char *name = PyUnicode_AsUTF8AndSize(path, NULL);
     if (name == NULL) {
         return -1;
     }
@@ -147,7 +87,7 @@ _posixshmem_shm_unlink_impl(PyObject *module, PyObject *path)
 {
     int rv;
     int async_err = 0;
-    const char *name = PyUnicode_AsUTF8(path);
+    const char *name = PyUnicode_AsUTF8AndSize(path, NULL);
     if (name == NULL) {
         return NULL;
     }

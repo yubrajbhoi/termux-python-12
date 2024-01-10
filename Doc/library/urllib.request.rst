@@ -21,12 +21,20 @@ authentication, redirections, cookies and more.
     The `Requests package <https://requests.readthedocs.io/en/master/>`_
     is recommended for a higher-level HTTP client interface.
 
+.. warning::
+
+   On macOS it is unsafe to use this module in programs using
+   :func:`os.fork` because the :func:`getproxies` implementation for
+   macOS uses a higher-level system API. Set the environment variable
+   ``no_proxy`` to ``*`` to avoid this problem
+   (e.g. ``os.environ["no_proxy"] = "*"``).
+
 .. include:: ../includes/wasm-notavail.rst
 
 The :mod:`urllib.request` module defines the following functions:
 
 
-.. function:: urlopen(url, data=None[, timeout], *, cafile=None, capath=None, cadefault=False, context=None)
+.. function:: urlopen(url, data=None[, timeout], *, context=None)
 
    Open *url*, which can be either a string containing a valid, properly
    encoded URL, or a :class:`Request` object.
@@ -46,14 +54,6 @@ The :mod:`urllib.request` module defines the following functions:
    If *context* is specified, it must be a :class:`ssl.SSLContext` instance
    describing the various SSL options. See :class:`~http.client.HTTPSConnection`
    for more details.
-
-   The optional *cafile* and *capath* parameters specify a set of trusted
-   CA certificates for HTTPS requests.  *cafile* should point to a single
-   file containing a bundle of CA certificates, whereas *capath* should
-   point to a directory of hashed certificate files.  More information can
-   be found in :meth:`ssl.SSLContext.load_verify_locations`.
-
-   The *cadefault* parameter is ignored.
 
    This function always returns an object which can work as a
    :term:`context manager` and has the properties *url*, *headers*, and *status*.
@@ -115,12 +115,9 @@ The :mod:`urllib.request` module defines the following functions:
       ``http/1.1`` when no *context* is given. Custom *context* should set
       ALPN protocols with :meth:`~ssl.SSLContext.set_alpn_protocol`.
 
-   .. deprecated:: 3.6
-
-       *cafile*, *capath* and *cadefault* are deprecated in favor of *context*.
-       Please use :meth:`ssl.SSLContext.load_cert_chain` instead, or let
-       :func:`ssl.create_default_context` select the system's trusted CA
-       certificates for you.
+    .. versionchanged:: 3.13
+       Remove *cafile*, *capath* and *cadefault* parameters: use the *context*
+       parameter instead.
 
 
 .. function:: install_opener(opener)
@@ -723,8 +720,8 @@ The following attribute and methods should only be used by classes derived from
 .. note::
 
    The convention has been adopted that subclasses defining
-   :meth:`<protocol>_request` or :meth:`<protocol>_response` methods are named
-   :class:`\*Processor`; all others are named :class:`\*Handler`.
+   :meth:`!<protocol>_request` or :meth:`!<protocol>_response` methods are named
+   :class:`!\*Processor`; all others are named :class:`!\*Handler`.
 
 
 .. attribute:: BaseHandler.parent
@@ -844,9 +841,9 @@ HTTPRedirectHandler Objects
 .. method:: HTTPRedirectHandler.redirect_request(req, fp, code, msg, hdrs, newurl)
 
    Return a :class:`Request` or ``None`` in response to a redirect. This is called
-   by the default implementations of the :meth:`http_error_30\*` methods when a
+   by the default implementations of the :meth:`!http_error_30\*` methods when a
    redirection is received from the server.  If a redirection should take place,
-   return a new :class:`Request` to allow :meth:`http_error_30\*` to perform the
+   return a new :class:`Request` to allow :meth:`!http_error_30\*` to perform the
    redirect to *newurl*.  Otherwise, raise :exc:`~urllib.error.HTTPError` if
    no other handler should try to handle this URL, or return ``None`` if you
    can't but another handler might.

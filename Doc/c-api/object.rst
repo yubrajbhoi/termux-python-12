@@ -27,17 +27,35 @@ Object Protocol
    instead of the :func:`repr`.
 
 
+.. c:function:: int PyObject_HasAttrWithError(PyObject *o, const char *attr_name)
+
+   Returns ``1`` if *o* has the attribute *attr_name*, and ``0`` otherwise.
+   This is equivalent to the Python expression ``hasattr(o, attr_name)``.
+   On failure, return ``-1``.
+
+   .. versionadded:: 3.13
+
+
+.. c:function:: int PyObject_HasAttrStringWithError(PyObject *o, const char *attr_name)
+
+   This is the same as :c:func:`PyObject_HasAttrWithError`, but *attr_name* is
+   specified as a :c:expr:`const char*` UTF-8 encoded bytes string,
+   rather than a :c:expr:`PyObject*`.
+
+   .. versionadded:: 3.13
+
+
 .. c:function:: int PyObject_HasAttr(PyObject *o, PyObject *attr_name)
 
-   Returns ``1`` if *o* has the attribute *attr_name*, and ``0`` otherwise.  This
-   is equivalent to the Python expression ``hasattr(o, attr_name)``.  This function
-   always succeeds.
+   Returns ``1`` if *o* has the attribute *attr_name*, and ``0`` otherwise.
+   This function always succeeds.
 
    .. note::
 
       Exceptions that occur when this calls :meth:`~object.__getattr__` and
       :meth:`~object.__getattribute__` methods are silently ignored.
-      For proper error handling, use :c:func:`PyObject_GetAttr` instead.
+      For proper error handling, use :c:func:`PyObject_HasAttrWithError`,
+      :c:func:`PyObject_GetOptionalAttr` or :c:func:`PyObject_GetAttr` instead.
 
 
 .. c:function:: int PyObject_HasAttrString(PyObject *o, const char *attr_name)
@@ -51,7 +69,9 @@ Object Protocol
       Exceptions that occur when this calls :meth:`~object.__getattr__` and
       :meth:`~object.__getattribute__` methods or while creating the temporary
       :class:`str` object are silently ignored.
-      For proper error handling, use :c:func:`PyObject_GetAttrString` instead.
+      For proper error handling, use :c:func:`PyObject_HasAttrStringWithError`,
+      :c:func:`PyObject_GetOptionalAttrString`
+      or :c:func:`PyObject_GetAttrString` instead.
 
 
 .. c:function:: PyObject* PyObject_GetAttr(PyObject *o, PyObject *attr_name)
@@ -60,6 +80,9 @@ Object Protocol
    value on success, or ``NULL`` on failure.  This is the equivalent of the Python
    expression ``o.attr_name``.
 
+   If the missing attribute should not be treated as a failure, you can use
+   :c:func:`PyObject_GetOptionalAttr` instead.
+
 
 .. c:function:: PyObject* PyObject_GetAttrString(PyObject *o, const char *attr_name)
 
@@ -67,6 +90,32 @@ Object Protocol
    specified as a :c:expr:`const char*` UTF-8 encoded bytes string,
    rather than a :c:expr:`PyObject*`.
 
+   If the missing attribute should not be treated as a failure, you can use
+   :c:func:`PyObject_GetOptionalAttrString` instead.
+
+
+.. c:function:: int PyObject_GetOptionalAttr(PyObject *obj, PyObject *attr_name, PyObject **result);
+
+   Variant of :c:func:`PyObject_GetAttr` which doesn't raise
+   :exc:`AttributeError` if the attribute is not found.
+
+   If the attribute is found, return ``1`` and set *\*result* to a new
+   :term:`strong reference` to the attribute.
+   If the attribute is not found, return ``0`` and set *\*result* to ``NULL``;
+   the :exc:`AttributeError` is silenced.
+   If an error other than :exc:`AttributeError` is raised, return ``-1`` and
+   set *\*result* to ``NULL``.
+
+   .. versionadded:: 3.13
+
+
+.. c:function:: int PyObject_GetOptionalAttrString(PyObject *obj, const char *attr_name, PyObject **result);
+
+   This is the same as :c:func:`PyObject_GetOptionalAttr`, but *attr_name* is
+   specified as a :c:expr:`const char*` UTF-8 encoded bytes string,
+   rather than a :c:expr:`PyObject*`.
+
+   .. versionadded:: 3.13
 
 .. c:function:: PyObject* PyObject_GenericGetAttr(PyObject *o, PyObject *name)
 
@@ -439,3 +488,21 @@ Object Protocol
    :c:macro:`Py_TPFLAGS_ITEMS_AT_END` set.
 
    .. versionadded:: 3.12
+
+.. c:function:: int PyObject_VisitManagedDict(PyObject *obj, visitproc visit, void *arg)
+
+   Visit the managed dictionary of *obj*.
+
+   This function must only be called in a traverse function of the type which
+   has the :c:macro:`Py_TPFLAGS_MANAGED_DICT` flag set.
+
+   .. versionadded:: 3.13
+
+.. c:function:: void PyObject_ClearManagedDict(PyObject *obj)
+
+   Clear the managed dictionary of *obj*.
+
+   This function must only be called in a traverse function of the type which
+   has the :c:macro:`Py_TPFLAGS_MANAGED_DICT` flag set.
+
+   .. versionadded:: 3.13
